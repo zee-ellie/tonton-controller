@@ -1,18 +1,15 @@
-import sys
-import os
 import tkinter as tk
 from tkinter import ttk
 from ttkbootstrap import Style, dialogs
-import pygetwindow as gw
 import configparser
-import pyautogui
-import keyboard
-import win32gui
-import pygetwindow as gw
 from cogs.window_manager import resize_all_clients
 from cogs.mode_solo import run_solo_mode, stop_solo_mode
 from cogs.mode_rr import run_rr_mode, stop_rr_mode
 from cogs.coord_finder import CoordinateFinder
+from cogs.target_window_manager import TargetWindowManager
+from cogs.mode_manager import ModeManager
+from cogs.window_fetcher import WindowFetcher
+from cogs.window_settings_manager import WindowSettingsManager
 
 class ClientControlGUI:
     def __init__(self, root, config_path, coords_path):
@@ -20,11 +17,28 @@ class ClientControlGUI:
         self.COORDS_PATH = coords_path
         self.root = root
         self.style = Style(theme='cyborg')
-        
-        # Initialize coordinate finder
-        self.coord_finder = CoordinateFinder(config_path)
 
-        # Check for required window using ttkbootstrap dialogs
+        # Initialize WindowFetcher first
+        self.window_fetcher = WindowFetcher(config_path)
+        
+        # Initialize all managers
+        self.window_fetcher = WindowFetcher(config_path)
+        self.coord_finder = CoordinateFinder(config_path)
+        self.target_window_manager = TargetWindowManager(config_path)
+        self.mode_manager = ModeManager(self.target_window_manager, config_path)
+        self.window_settings_manager = WindowSettingsManager(config_path)
+
+        # Initialize stored HWND
+        self.current_coord_hwnd = None
+
+        # Check for required window
+        if not self.validate_initial_setup():
+            return
+            
+        self.setup_gui()
+
+    def validate_initial_setup(self):
+        """Validate that required windows exist"""
         config = configparser.ConfigParser()
         config.read(self.CONFIG_PATH)
         instance_name = config.get('GLOBAL', 'instance', fallback='')
@@ -36,9 +50,9 @@ class ClientControlGUI:
                 parent=self.root
             )
             self.root.destroy()
-            return
+            return False
             
-        windows = gw.getWindowsWithTitle(instance_name)
+        windows = self.window_fetcher.get_all_windows()
         if not windows:
             dialogs.Messagebox.show_error(
                 title="Window Not Found",
@@ -46,14 +60,13 @@ class ClientControlGUI:
                 parent=self.root
             )
             self.root.destroy()
-            return
-            
-        # Only proceed if window exists
-        self.setup_gui()
+            return False
+        
+        return True
 
     def setup_gui(self):
         self.root.title("吨吨鼠Controls")
-        self.root.geometry("300x300")
+        self.root.geometry("300x350")
         self.root.resizable(False, False)
         
         # Create notebook (tabs)
@@ -78,10 +91,14 @@ class ClientControlGUI:
         # Load settings (placeholder)
         self.load_settings()
         
+        # Refresh all window lists after GUI is fully set up
+        self.refresh_all_windows()
+
     def create_control_tab(self):
         self.control_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.control_tab, text="Control")
         
+        # Mode selection frame
         mode_frame = ttk.LabelFrame(self.control_tab, text="Mode Selection", padding=10)
         mode_frame.pack(fill='x', padx=5, pady=5)
         
@@ -94,7 +111,9 @@ class ClientControlGUI:
         )
         self.mode_combo.current(0)
         self.mode_combo.pack(fill='x')
+        self.mode_combo.bind('<<ComboboxSelected>>', self.on_mode_changed)
         
+        # Control buttons frame
         btn_frame = ttk.LabelFrame(self.control_tab, text="Controls", padding=10)
         btn_frame.pack(fill='x', padx=5, pady=5)
         
@@ -108,10 +127,76 @@ class ClientControlGUI:
         self.stop_btn.pack(side='left', expand=True, padx=2)
         self.resize_btn.pack(side='left', expand=True, padx=2)
         
+        # Target Window frame (initially hidden)
+        self.win_frame = ttk.LabelFrame(self.control_tab, text="Target Window", padding=10)
+        
+        self.win_var = tk.StringVar()
+        self.win_combo = ttk.Combobox(self.win_frame, textvariable=self.win_var, state='readonly')
+        self.win_combo.pack(fill='x', pady=(0, 10))
+        
+        # Buttons frame for centering
+        button_frame = ttk.Frame(self.win_frame)
+        button_frame.pack(fill='x', pady=(0, 5))
+        
+        self.refresh_btn = ttk.Button(button_frame, text="Refresh Windows", command=self.refresh_all_windows, style='info.TButton')
+        self.set_btn = ttk.Button(button_frame, text="Set Window", command=self.set_target_window, style='primary.TButton')
+        
+        self.refresh_btn.pack(side='left', expand=True, padx=(10, 5))
+        self.set_btn.pack(side='left', expand=True, padx=(5, 10))
+        
+        self.win_frame.pack_forget()
+
     def create_settings_tab(self):
         self.settings_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.settings_tab, text="Settings")
         
+        # New Window Settings frame
+        win_settings_frame = ttk.LabelFrame(self.settings_tab, text="Window Settings", padding=10)
+        win_settings_frame.pack(fill='x', padx=5, pady=5)
+        
+        # Label for window width - First row
+        ttk.Label(win_settings_frame, text="Desired Window Width:").pack(anchor='w', pady=(0, 5))
+        
+        # Width spinbox - Second row
+        self.width_var = tk.StringVar()
+        settings_info = self.window_settings_manager.get_window_settings()
+        
+        # Create spinbox with less restrictive validation
+        self.width_spinbox = ttk.Spinbox(
+            win_settings_frame,
+            from_=settings_info['min_width'],
+            to=settings_info['max_width'],
+            textvariable=self.width_var,
+            width=15,
+            validate='focusout',  # Validate when focus leaves, not on every keypress
+            validatecommand=(self.root.register(self.validate_width_input), '%P')
+        )
+        self.width_spinbox.pack(fill='x', pady=(0, 10))
+        
+        # Buttons frame - Third row
+        buttons_frame = ttk.Frame(win_settings_frame)
+        buttons_frame.pack(fill='x')
+        
+        self.set_width_btn = ttk.Button(
+            buttons_frame, 
+            text="Set Width", 
+            command=self.set_window_width,
+            style='primary.TButton'
+        )
+        self.set_width_btn.pack(side='left', expand=True, padx=(0, 5))
+        
+        self.reset_width_btn = ttk.Button(
+            buttons_frame, 
+            text="Reset to Default", 
+            command=self.reset_window_width,
+            style='info.TButton'
+        )
+        self.reset_width_btn.pack(side='left', expand=True, padx=(5, 0))
+        
+        # Load current width
+        self.load_current_width()
+        
+        # Existing Configuration frame
         settings_frame = ttk.LabelFrame(self.settings_tab, text="Configuration", padding=10)
         settings_frame.pack(fill='both', expand=True, padx=5, pady=5)
         
@@ -123,10 +208,9 @@ class ClientControlGUI:
         ttk.Checkbutton(settings_frame, text="Party by default", variable=self.party_default).pack(anchor='w', pady=2)
         ttk.Checkbutton(settings_frame, text="Accept Bounty Invites", variable=self.accept_bounty).pack(anchor='w', pady=2)
         ttk.Checkbutton(settings_frame, text="Mute Clients", variable=self.mute_clients).pack(anchor='w', pady=2)
-        ttk.Checkbutton(settings_frame, text="Refresh raid after 3 count", variable=self.refresh_raid).pack(anchor='w', pady=2)
         
         ttk.Button(settings_frame, text="Save Settings", command=self.save_settings, style='success.TButton').pack(pady=10)
-        
+
     def create_clients_tab(self):
         self.clients_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.clients_tab, text="Clients")
@@ -146,7 +230,7 @@ class ClientControlGUI:
         self.tree.pack(fill='both', expand=True)
         
         ttk.Button(self.client_list_frame, text="Refresh List", command=self.refresh_client_list, style='info.TButton').pack(pady=5)
-        
+
     def create_logs_tab(self):
         self.logs_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.logs_tab, text="Logs")
@@ -169,7 +253,7 @@ class ClientControlGUI:
 
     def create_coord_tab(self):
         self.coord_tab = ttk.Frame(self.notebook)
-        self.notebook.add(self.coord_tab, text="Coordinates")
+        self.notebook.add(self.coord_tab, text="Debug")
 
         coord_frame = ttk.LabelFrame(self.coord_tab, text="Mouse Position Finder", padding=10)
         coord_frame.pack(fill='both', expand=True, padx=5, pady=5)
@@ -179,14 +263,17 @@ class ClientControlGUI:
         self.window_combo = ttk.Combobox(coord_frame, textvariable=self.selected_hwnd, state='readonly')
         self.window_combo.pack(fill='x', pady=(0, 8))
 
-        ttk.Button(coord_frame, text="Refresh Window List", command=self.populate_window_list, style='info.TButton').pack(pady=(0, 10))
+        self.window_combo.bind('<<ComboboxSelected>>', self.on_coord_window_selected)
+
+        ttk.Button(coord_frame, text="Refresh Window List", command=self.populate_coord_window_list, style='info.TButton').pack(pady=(0, 10))
 
         self.coord_label = ttk.Label(
             coord_frame, 
-            text="Screen: X=0, Y=0\nWindow-relative: X=0, Y=0\nColor: null", 
-            font=('Consolas', 9)
+            text="Screen: X=0, Y=0\nClient-relative: X=0, Y=0\nColor: null\nClient size: Unknown", 
+            font=('Consolas', 9),
+            justify='left'
         )
-        self.coord_label.pack(pady=10)
+        self.coord_label.pack(pady=10, fill='x')
         self.make_label_copyable(self.coord_label)
 
         self.hotkey_listening = tk.BooleanVar(value=True)
@@ -206,43 +293,133 @@ class ClientControlGUI:
             command=self.toggle_tracking
         )
         self.toggle_tracking_btn.pack(pady=5)
+        
+        # Enable hotkey listener immediately after creating the tab
+        self.toggle_hotkey_listener()
 
-        if self.hotkey_listening.get():
-            self.toggle_hotkey_listener()
-    
+    def on_mode_changed(self, event=None):
+        """Handle mode change - show/hide target window frame"""
+        selected_mode = self.mode_var.get()
+        mode_info = self.mode_manager.set_mode(selected_mode)
+        
+        if mode_info['needs_target_window']:
+            self.win_frame.pack(fill='x', padx=5, pady=5)
+            if not mode_info['has_target_window']:
+                self.log_action("Realm Raid mode requires a target window to be set", 'system')
+        else:
+            self.win_frame.pack_forget()
+
+    def refresh_all_windows(self):
+        """Refresh window lists in all tabs"""
+        try:
+            window_list = self.window_fetcher.get_window_info_list()
+            
+            # Update Control tab dropdown
+            self.win_combo['values'] = window_list
+            if window_list and self.win_combo.get() == "":
+                self.win_combo.current(0)
+            
+            # Update Coordinates tab dropdown
+            self.window_combo['values'] = window_list
+            if window_list and self.window_combo.get() == "":
+                self.window_combo.current(0)
+            
+            # Refresh Clients tab
+            self.refresh_client_list()
+            
+            if window_list:
+                self.log_action(f"Refreshed all window lists: {len(window_list)} window(s)", 'system')
+                
+        except Exception as e:
+            self.log_action(f"Error refreshing windows: {e}", 'error')
+
+    def on_coord_window_selected(self, event=None):
+        """Store the selected HWND when Coordinate tab dropdown changes"""
+        selected = self.selected_hwnd.get()
+        
+        if selected:
+            hwnd = self.coord_finder.parse_hwnd_from_selection(selected)
+            
+            if hwnd:
+                self.current_coord_hwnd = hwnd
+                self.log_action(f"Coordinate target set to HWND: {hwnd}", 'system')
+            else:
+                print("DEBUG: Failed to parse HWND")
+        else:
+            print("DEBUG: No selection in dropdown")
+
+    def refresh_client_list(self):
+        """Refresh client list in Clients tab"""
+        self.tree.delete(*self.tree.get_children())
+        
+        try:
+            treeview_data = self.window_fetcher.get_window_treeview_data()
+            for hwnd, pos in treeview_data:
+                self.tree.insert('', 'end', values=(hwnd, pos))
+        except Exception as e:
+            self.log_action(f"Error refreshing client list: {str(e)}", 'error')
+
+    def populate_coord_window_list(self):
+        """Populate window list in Coordinates tab"""
+        try:
+            window_list = self.window_fetcher.get_window_info_list()
+            self.window_combo['values'] = window_list
+            
+            if window_list and self.window_combo.get() == "":
+                self.window_combo.current(0)
+                self.log_action(f"Loaded {len(window_list)} client(s) into coordinate finder", 'system')
+            else:
+                self.log_action("No windows found matching instance name", 'error')
+                
+        except Exception as e:
+            self.log_action(f"Error populating window list: {e}", 'error')
+
+    def set_target_window(self):
+        """Set the target window using the manager"""
+        selected = self.win_var.get()
+        success, message = self.target_window_manager.set_target_window(selected)
+        
+        if success:
+            self.log_action(message, 'success')
+        else:
+            self.log_action(message, 'error')
+
     def toggle_hotkey_listener(self):
+        """Toggle F8 hotkey listener using CoordinateFinder"""
         try:
             if self.hotkey_listening.get():
-                keyboard.add_hotkey('f8', self.capture_mouse_position)
+                self.coord_finder.toggle_hotkey_listener(self.capture_mouse_position)
                 self.log_action("Hotkey listener enabled (Press F8 to capture position)", 'system')
             else:
-                keyboard.remove_hotkey('f8')
+                self.coord_finder.toggle_hotkey_listener(self.capture_mouse_position)
                 self.log_action("Hotkey listener disabled", 'system')
         except Exception as e:
             self.log_action(f"Error toggling hotkey listener: {e}", 'error')
 
     def capture_mouse_position(self):
-        """Capture mouse position using CoordinateFinder utility"""
+        """Capture mouse position using the stored HWND"""
         try:
-            selected = self.selected_hwnd.get()
-            hwnd = None
+            # Use the stored HWND
+            if hasattr(self, 'current_coord_hwnd') and self.current_coord_hwnd:
+                hwnd = self.current_coord_hwnd
+            else:
+                # Fallback: parse from dropdown
+                selected = self.selected_hwnd.get()
+                hwnd = self.coord_finder.parse_hwnd_from_selection(selected) if selected else None
+                if hwnd:
+                    self.current_coord_hwnd = hwnd
             
-            if selected:
-                hwnd = self.coord_finder.parse_hwnd_from_selection(selected)
-                if hwnd is None:
-                    self.log_action("Error parsing HWND from selection", "error")
-                    return
-            
-            # Capture position data
-            data = self.coord_finder.capture_position_data(hwnd)
-            
-            # Format and display
+            if not hwnd:
+                self.log_action("No window selected for coordinate capture", 'error')
+                return
+                
+            data = self.coord_finder.capture_client_position_data(hwnd)
             display_text = self.coord_finder.format_position_string(data)
             self.coord_label.config(text=display_text)
             
             # Log the capture
-            if hwnd:
-                log_msg = f"Captured HWND={hwnd}, Relative: X={data['rel_x']}, Y={data['rel_y']}, Color: {data['hex_color']}"
+            if data.get('client_x') is not None:
+                log_msg = f"Captured Client: X={data['client_x']}, Y={data['client_y']}, Color: {data['hex_color']}"
             else:
                 log_msg = f"Captured Screen: X={data['screen_x']}, Y={data['screen_y']}, Color: {data['hex_color']}"
             
@@ -253,6 +430,7 @@ class ClientControlGUI:
             self.log_action(f"Coordinate capture error: {e}", "error")
 
     def toggle_tracking(self):
+        """Toggle live coordinate tracking"""
         if self.tracking.get():
             self.log_action("Live coordinate tracking enabled", 'system')
             self.update_mouse_position()
@@ -260,32 +438,23 @@ class ClientControlGUI:
             self.log_action("Live coordinate tracking stopped", 'system')
 
     def update_mouse_position(self):
-        """Update mouse position display in real-time"""
+        """Update mouse position display in real-time using CoordinateFinder"""
         if not self.tracking.get():
             return
         
         try:
-            x, y = self.coord_finder.get_screen_position()
-            self.coord_label.config(text=f"X: {x}, Y: {y}")
+            selected = self.selected_hwnd.get()
+            hwnd = self.coord_finder.parse_hwnd_from_selection(selected) if selected else None
+            
+            # Get live update using CoordinateFinder
+            data = self.coord_finder.get_live_update(hwnd)
+            display_text = self.coord_finder.format_position_string(data)
+            self.coord_label.config(text=display_text)
+            
         except Exception as e:
             self.coord_label.config(text=f"Error: {e}")
         
         self.root.after(100, self.update_mouse_position)
-
-    def populate_window_list(self):
-        """Populate window combobox using CoordinateFinder utility"""
-        try:
-            window_list = self.coord_finder.get_window_info_list()
-            self.window_combo['values'] = window_list
-            
-            if window_list:
-                self.window_combo.current(0)
-                self.log_action(f"Loaded {len(window_list)} client(s) into coordinate finder", 'system')
-            else:
-                self.log_action("No windows found matching instance name", 'error')
-                
-        except Exception as e:
-            self.log_action(f"Error populating window list: {e}", 'error')
 
     def make_label_copyable(self, label):
         """Allow right-click to copy label text to clipboard"""
@@ -294,15 +463,15 @@ class ClientControlGUI:
             self.root.clipboard_append(label.cget("text"))
         label.bind("<Button-3>", copy_text)
 
-    def set_size(self):
-        success = resize_all_clients(self.log_action, action_label="Setting window size for all clients")
-        if success:
-            self.start_btn['state'] = 'normal'
-            self.set_size_btn['state'] = 'disabled'
-            self.resize_btn['state'] = 'normal'
-
     def start_clicker(self):
         mode = self.mode_var.get()
+        
+        # Check if mode can be started
+        is_valid, message = self.mode_manager.validate_mode_setup(mode)
+        if not is_valid:
+            self.log_action(message, 'error')
+            return
+        
         self.log_action(f"Starting mode: {mode}", 'control')
         self.start_btn['state'] = 'disabled'
         self.stop_btn['state'] = 'normal'
@@ -322,7 +491,7 @@ class ClientControlGUI:
                 return
 
             hwnd_list = []
-            for win in gw.getWindowsWithTitle(instance_name):
+            for win in self.window_fetcher.get_all_windows():
                 if win._hWnd and win.visible:
                     hwnd_list.append(win)
 
@@ -350,27 +519,100 @@ class ClientControlGUI:
         self.start_btn['state'] = 'normal'
         self.resize_btn['state'] = 'normal'
         self.stop_btn['state'] = 'disabled'
+    
+    def validate_width_input(self, value):
+        """GUI wrapper for width validation"""
+        return self.window_settings_manager.validate_width_input(value)
+
+    def load_current_width(self):
+        """Load current width from config and set in spinbox"""
+        current_width = self.window_settings_manager.get_current_width()
+        self.width_var.set(str(current_width))
+
+    def set_window_width(self):
+        """Set the window width using the manager and resize windows"""
+        try:
+            width_str = self.width_var.get().strip()
+            if not width_str:
+                self.log_action("Please enter a width value", 'error')
+                return
+                
+            if not width_str.isdigit():
+                self.log_action("Width must be a number", 'error')
+                return
+                
+            width = int(width_str)
+            success, message = self.window_settings_manager.set_window_width(width)
+            
+            if success:
+                self.log_action(message, 'success')
+                # Auto-resize windows
+                self.resize_windows_after_width_change()
+                # Update button states (same as set_size)
+                self.set_size_btn['state'] = 'disabled'
+                self.start_btn['state'] = 'normal'
+                self.resize_btn['state'] = 'normal'
+            else:
+                self.log_action(message, 'error')
+                
+        except ValueError:
+            self.log_action("Please enter a valid number for width", 'error')
+        except Exception as e:
+            self.log_action(f"Error setting window width: {e}", 'error')
+
+    def reset_window_width(self):
+        """Reset window width using the manager and resize windows"""
+        success, message, default_width = self.window_settings_manager.reset_window_width()
+        
+        if success:
+            self.width_var.set(str(default_width))
+            self.log_action(message, 'success')
+            # Auto-resize windows
+            self.resize_windows_after_width_change()
+            # Update button states (same as set_size)
+            self.set_size_btn['state'] = 'disabled'
+            self.start_btn['state'] = 'normal'
+            self.resize_btn['state'] = 'normal'
+        else:
+            self.log_action(message, 'error')
+
+    def resize_windows(self, action_label="Resizing client windows", update_buttons=True):
+        """Unified method to resize all windows"""
+        try:
+            success = resize_all_clients(self.log_action, action_label=action_label)
+            
+            if success and update_buttons:
+                self.start_btn['state'] = 'normal'
+                self.resize_btn['state'] = 'normal'
+                if "Setting window size" in action_label:
+                    self.set_size_btn['state'] = 'disabled'
+            
+            return success
+            
+        except Exception as e:
+            self.log_action(f"Error during resize operation: {e}", 'error')
+            return False
 
     def resize_clients(self):
-        success = resize_all_clients(self.log_action, action_label="Resizing client windows")
-        if success:
-            self.resize_btn['state'] = 'normal'
+        """Manual resize clients - called from Control tab"""
+        self.resize_windows(
+            action_label="Resizing client windows", 
+            update_buttons=True
+        )
 
-    def refresh_client_list(self):
-        self.log_action("Refreshing client list", 'system')
-        self.tree.delete(*self.tree.get_children())
-        config = configparser.ConfigParser()
-        config.read(self.CONFIG_PATH)
-        instance_name = config.get('GLOBAL', 'instance', fallback='')
+    def set_size(self):
+        """Initial window size setup"""
+        self.resize_windows(
+            action_label="Setting window size for all clients", 
+            update_buttons=True
+        )
 
-        try:
-            windows = gw.getWindowsWithTitle(instance_name)
-            for i, window in enumerate(windows[:10]):
-                hwnd = window._hWnd if hasattr(window, '_hWnd') else hex(id(window))
-                pos = f"{window.left},{window.top}"
-                self.tree.insert('', 'end', values=(hwnd, pos))
-        except Exception as e:
-            self.log_action(f"Error refreshing client list: {str(e)}", 'error')
+    def resize_windows_after_width_change(self):
+        """Resize all windows after width change (no button updates)"""
+        self.resize_windows(
+            action_label="Auto-resizing windows to new width", 
+            update_buttons=False
+        )
 
     def log_action(self, message, tag='system'):
         self.log_text.config(state='normal')
