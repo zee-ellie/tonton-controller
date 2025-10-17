@@ -17,23 +17,83 @@ class WindowFetcher:
         except Exception:
             return []
     
+    def get_position_label(self, x, y):
+        """Generate a friendly position label based on screen coordinates"""
+        # Horizontal position
+        if x < 800:
+            h_pos = "Left"
+        elif x < 1600:
+            h_pos = "Center"
+        else:
+            h_pos = "Right"
+        
+        # Vertical position
+        if y < 300:
+            v_pos = "Top"
+        elif y < 600:
+            v_pos = "Middle"
+        else:
+            v_pos = "Bottom"
+        
+        return f"{v_pos} {h_pos}"
+    
     def get_window_info_list(self):
-        """Get formatted list for dropdown (HWND | x,y)"""
+        """Get formatted list for dropdown with user-friendly display
+        Format: "Client #1 - Top Left (234, 156) | HWND: 12345"
+        
+        This format is used in:
+        - Control tab: Target Window dropdown
+        - Debug tab: Mouse Position Finder dropdown
+        """
         windows = self.get_all_windows()
-        return [f"{win._hWnd} | {win.left},{win.top}" for win in windows]
+        result = []
+        
+        for idx, win in enumerate(windows, 1):
+            position_label = self.get_position_label(win.left, win.top)
+            # Format: "Client #1 - Top Left (234, 156) | HWND: 12345"
+            display_text = f"Client #{idx} - {position_label} ({win.left}, {win.top}) | HWND: {win._hWnd}"
+            result.append(display_text)
+        
+        return result
     
     def get_window_treeview_data(self):
-        """Get data for Treeview in Clients tab"""
+        """Get data for Treeview in Clients tab with friendly labels
+        Returns: list of tuples (client_label, position_text, hwnd)
+        """
         windows = self.get_all_windows()
-        return [(win._hWnd, f"{win.left},{win.top}") for win in windows]
+        result = []
+        
+        for idx, win in enumerate(windows, 1):
+            position_label = self.get_position_label(win.left, win.top)
+            client_label = f"Client #{idx}"
+            position_text = f"{position_label} ({win.left}, {win.top})"
+            hwnd_text = str(win._hWnd)
+            result.append((client_label, position_text, hwnd_text))
+        
+        return result
     
     def get_window_objects(self):
         """Get raw window objects"""
         return self.get_all_windows()
     
     def parse_hwnd_from_selection(self, selection_string):
-        """Parse HWND from selection string in format 'HWND | x,y'"""
+        """Parse HWND from selection string
+        Handles multiple formats:
+        - "Client #1 - Top Left (234, 156) | HWND: 12345"
+        - "12345 | 234,156" (legacy format)
+        """
         try:
+            # New format: contains "HWND: "
+            if "HWND:" in selection_string:
+                hwnd_str = selection_string.split("HWND:")[1].strip()
+                return int(hwnd_str)
+            
+            # Alternative format: contains "HWND="
+            if "HWND=" in selection_string:
+                hwnd_str = selection_string.split("HWND=")[1].strip()
+                return int(hwnd_str)
+            
+            # Legacy format: "12345 | 234,156"
             hwnd_str = selection_string.split('|')[0].strip()
             return int(hwnd_str)
         except Exception:
