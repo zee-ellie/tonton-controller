@@ -17,6 +17,28 @@ class WindowFetcher:
         except Exception:
             return []
     
+    def get_all_windows_sorted(self):
+        """Get all windows sorted by position (top to bottom, left to right)
+        
+        Sorting logic:
+        1. Primary sort: Y position (top to bottom)
+        2. Secondary sort: X position (left to right)
+        
+        This ensures consistent ordering like reading a book:
+        Row 1: [Client #1] [Client #2] [Client #3]
+        Row 2: [Client #4] [Client #5] [Client #6]
+        """
+        windows = self.get_all_windows()
+        
+        # Sort by Y first (top to bottom), then by X (left to right)
+        # We use a tolerance of 100 pixels for Y to group windows in the same "row"
+        def sort_key(win):
+            # Round Y to nearest 100 to group windows in same row
+            row = win.top // 100
+            return (row, win.left)
+        
+        return sorted(windows, key=sort_key)
+    
     def get_position_label(self, x, y):
         """Generate a friendly position label based on screen coordinates"""
         # Horizontal position
@@ -44,8 +66,10 @@ class WindowFetcher:
         This format is used in:
         - Control tab: Target Window dropdown
         - Debug tab: Mouse Position Finder dropdown
+        
+        Windows are sorted by position (top-left to bottom-right)
         """
-        windows = self.get_all_windows()
+        windows = self.get_all_windows_sorted()
         result = []
         
         for idx, win in enumerate(windows, 1):
@@ -59,8 +83,10 @@ class WindowFetcher:
     def get_window_treeview_data(self):
         """Get data for Treeview in Clients tab with friendly labels
         Returns: list of tuples (client_label, position_text, hwnd)
+        
+        Windows are sorted by position (top-left to bottom-right)
         """
-        windows = self.get_all_windows()
+        windows = self.get_all_windows_sorted()
         result = []
         
         for idx, win in enumerate(windows, 1):
@@ -73,8 +99,8 @@ class WindowFetcher:
         return result
     
     def get_window_objects(self):
-        """Get raw window objects"""
-        return self.get_all_windows()
+        """Get raw window objects sorted by position"""
+        return self.get_all_windows_sorted()
     
     def parse_hwnd_from_selection(self, selection_string):
         """Parse HWND from selection string
@@ -111,8 +137,8 @@ class WindowFetcher:
             return None
     
     def refresh_windows(self):
-        """Force refresh of window list"""
-        return self.get_all_windows()
+        """Force refresh of window list (sorted)"""
+        return self.get_all_windows_sorted()
     
     def get_window_count(self):
         """Get count of available windows"""

@@ -91,12 +91,10 @@ class ModeManager:
         
         mode_config = {}
         
-        if mode_name in ["Realm Raid", "Guild Realm Raid"]:
-            # Realm Raid specific configuration
-            if config.has_section('REALM_RAID'):
-                mode_config.update(dict(config.items('REALM_RAID')))
+        # Note: REALM_RAID section removed from config.ini
+        # No need to store HWND - it's managed in memory by TargetWindowManager
         
-        elif mode_name == "Solo":
+        if mode_name == "Solo":
             # Solo mode specific configuration
             if config.has_section('SOLO'):
                 mode_config.update(dict(config.items('SOLO')))
@@ -124,14 +122,14 @@ class ModeManager:
             
             return False, f"Unable to start {mode_name}: requirements not met"
         
-        # Additional validations can be added here
+        # Additional validations for Realm Raid modes
         if mode_name in ["Realm Raid", "Guild Realm Raid"]:
             target_hwnd = self.target_window_manager.get_target_hwnd()
             if target_hwnd:
                 # Verify the target window still exists
                 window = self.target_window_manager.window_fetcher.get_window_by_hwnd(target_hwnd)
                 if not window:
-                    return False, "Target window no longer exists. Please set a new target window."
+                    return False, "Target window no longer exists. Please refresh windows."
         
         return True, f"{mode_name} mode is ready to start"
     

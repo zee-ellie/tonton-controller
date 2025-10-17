@@ -41,11 +41,18 @@ class RealmRaidAutomation:
     FROGLET_LOAD_TIME = 2.0
     # ==============================================================
     
-    def __init__(self, log_func, config_path, coords_path, hwnd_list):
+    def __init__(self, log_func, config_path, coords_path, target_hwnd):
+        """
+        Args:
+            log_func: Logging function
+            config_path: Path to config.ini
+            coords_path: Path to coords.ini
+            target_hwnd: The HWND of the specific window to automate (integer)
+        """
         self.log_func = log_func
         self.config_path = config_path
         self.coords_path = coords_path
-        self.hwnd_list = hwnd_list
+        self.target_hwnd = target_hwnd  # Store the specific target HWND
         self.running = False
         
         # Initialize templates dict FIRST
@@ -709,14 +716,22 @@ class RealmRaidAutomation:
         print("="*60)
         self.log("Starting Realm Raid automation", 'system')
         
-        if not self.hwnd_list:
-            self.log("No windows available", 'error')
+        hwnd = self.target_hwnd
+        self.log(f"Using target HWND: {hwnd}", 'system')
+        
+        # Verify the window still exists
+        import win32gui
+        try:
+            if not win32gui.IsWindow(hwnd):
+                self.log("Target window no longer exists!", 'error')
+                self.running = False
+                _rr_running = False
+                return
+        except:
+            self.log("Cannot access target window", 'error')
             self.running = False
             _rr_running = False
             return
-        
-        hwnd = self.hwnd_list[0]._hWnd
-        self.log(f"Using HWND: {hwnd}", 'system')
         
         if not self.resize_window_to_reference(hwnd):
             self.log("Window resize failed", 'error')
@@ -937,107 +952,15 @@ class RealmRaidAutomation:
         
         return False
     
-    def run(self):
-        """Main automation loop"""
-        global _rr_running
-        
-        self.running = True
-        _rr_running = True
-        
-        print("\n" + "="*60)
-        print("[START] Realm Raid Automation Starting")
-        print("="*60)
-        self.log("Starting Realm Raid automation", 'system')
-        
-        if not self.hwnd_list:
-            self.log("No windows available", 'error')
-            self.running = False
-            _rr_running = False
-            return
-        
-        hwnd = self.hwnd_list[0]._hWnd
-        self.log(f"Using HWND: {hwnd}", 'system')
-        
-        if not self.resize_window_to_reference(hwnd):
-            self.log("Window resize failed", 'error')
-            self.running = False
-            _rr_running = False
-            return
-        
-        try:
-            while self.running and _rr_running:
-                if not self.running or not _rr_running:
-                    break
-                
-                self.log("Starting new page scan...", 'system')
-                if not self.check_initial_grid(hwnd):
-                    break
-                
-                self.log(f"Found {len(self.available_matches)} available matches", 'system')
-                
-                if not self.available_matches:
-                    if self.fail_matches:
-                        if not self.refresh_page_if_needed(hwnd):
-                            break
-                        
-                        if not self.interruptible_sleep(self.PAGE_CYCLE_WAIT):
-                            break
-                        
-                        if not self.check_initial_grid(hwnd):
-                            break
-                        
-                        if not self.available_matches:
-                            self.log("All matches completed", 'success')
-                            break
-                    else:
-                        self.log("All matches completed", 'success')
-                        break
-                
-                for idx, position in enumerate(self.available_matches[:], 1):
-                    if not self.running or not _rr_running:
-                        break
-                    
-                    self.log(f"Match {idx}/{len(self.available_matches)}: Position {position}", 'control')
-                    
-                    result = self.process_single_match(hwnd, position)
-                    
-                    if result == "ENTRY_EXHAUSTED":
-                        self.log("Entry count exhausted", 'error')
-                        self.running = False
-                        _rr_running = False
-                        self.restore_window_size()
-                        break
-                    elif not result:
-                        self.log(f"Failed to process {position}", 'error')
-                        continue
-                
-                if self.running and _rr_running:
-                    if self.fail_matches:
-                        if not self.refresh_page_if_needed(hwnd):
-                            break
-                
-                self.ko_matches = []
-                self.fail_matches = []
-                self.froglet_matches = []
-                self.available_matches = []
-                
-                if self.running and _rr_running:
-                    if not self.interruptible_sleep(self.PAGE_CYCLE_WAIT):
-                        break
-                
-        except Exception as e:
-            self.log(f"Error in automation: {e}", 'error')
-            import traceback
-            traceback.print_exc()
-        finally:
-            self.restore_window_size()
-            self.running = False
-            _rr_running = False
-            self.log(f"Automation stopped - Total: {self.total_complete}", 'system')
-
-
-def run_rr_mode(log_func, config_path, coords_path, hwnd_list):
-    """Start Realm Raid mode"""
+def run_rr_mode(log_func, config_path, coords_path, target_hwnd):
+    """Start Realm Raid mode with the specified target window
+    
+    Args:
+        log_func: Logging function
+        config_path: Path to config.ini
+        coords_path: Path to coords.ini
+        target_hwnd: The HWND of the window to automate (integer)
+    """
     global _rr_running, _rr_thread, _rr_automation_instance
     
     if _rr_running:
@@ -1045,7 +968,12 @@ def run_rr_mode(log_func, config_path, coords_path, hwnd_list):
         return
     
     _rr_running = True
-    _rr_automation_instance = RealmRaidAutomation(log_func, config_path, coords_path, hwnd_list)
+    _rr_automation_instance = RealmRaidAutomation(
+        log_func, 
+        config_path, 
+        coords_path, 
+        target_hwnd  # Pass the specific HWND, not a list!
+    )
     
     def thread_target():
         global _rr_running
@@ -1055,7 +983,7 @@ def run_rr_mode(log_func, config_path, coords_path, hwnd_list):
     _rr_thread = threading.Thread(target=thread_target, daemon=True)
     _rr_thread.start()
     
-    log_func("Realm Raid mode started", 'system')
+    log_func(f"Realm Raid mode started on HWND: {target_hwnd}", 'system')
 
 
 def stop_rr_mode():
