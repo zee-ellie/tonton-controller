@@ -113,15 +113,24 @@ class TargetWindowManager:
         Get the formatted string for the current target window.
         Useful for displaying in the GUI combobox.
         Returns None if no target or window not found.
+        
+        Format: "Client #1 - Top Left (234, 156) | HWND: 12345"
         """
         if not self.target_hwnd:
             return None
         
         try:
-            window = self.window_fetcher.get_window_by_hwnd(self.target_hwnd)
-            if window:
-                # Format: "Title - HWND=12345" (matching get_window_info_list format)
-                return f"{window.title} - HWND={window._hWnd}"
+            # Get all windows to find the matching one
+            windows = self.window_fetcher.get_all_windows()
+            window_list = self.window_fetcher.get_window_info_list()
+            
+            # Find the window with matching HWND
+            for idx, win in enumerate(windows):
+                if win._hWnd == self.target_hwnd:
+                    # Return the corresponding formatted string from window_list
+                    if idx < len(window_list):
+                        return window_list[idx]
+            
             return None
         except Exception:
             return None

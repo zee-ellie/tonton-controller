@@ -246,17 +246,20 @@ class ClientControlGUI:
         ttk.Button(settings_frame, text="Save Settings", command=self.save_settings, style='success.TButton').pack(pady=10)
 
     def create_clients_tab(self):
+        """Updated clients tab with reordered columns: Client | HWND | Position"""
         self.clients_tab = ttk.Frame(self.notebook)
         self.notebook.add(self.clients_tab, text="Clients")
         
         self.client_list_frame = ttk.LabelFrame(self.clients_tab, text="Active Clients", padding=10)
         self.client_list_frame.pack(fill='both', expand=True, padx=5, pady=5)
-        
-        self.tree = ttk.Treeview(self.client_list_frame, columns=('HWND', 'Position'), show='headings')
+
+        self.tree = ttk.Treeview(self.client_list_frame, columns=('Client', 'HWND', 'Position'), show='headings')
+        self.tree.heading('Client', text='Client')
         self.tree.heading('HWND', text='HWND')
-        self.tree.heading('Position', text='Position')
-        self.tree.column('HWND', width=100)
-        self.tree.column('Position', width=150)
+        self.tree.heading('Position', text='Screen Position')
+        self.tree.column('Client', width=50)
+        self.tree.column('HWND', width=50)
+        self.tree.column('Position', width=130)
         
         vsb = ttk.Scrollbar(self.client_list_frame, orient="vertical", command=self.tree.yview)
         vsb.pack(side='right', fill='y')
@@ -439,13 +442,14 @@ class ClientControlGUI:
                 self.log_action(f"Coordinate target set to HWND: {hwnd}", 'system')
 
     def refresh_client_list(self):
-        """Refresh client list in Clients tab"""
+        """Refresh client list in Clients tab with reordered columns: Client | HWND | Position"""
         self.tree.delete(*self.tree.get_children())
         
         try:
             treeview_data = self.window_fetcher.get_window_treeview_data()
-            for hwnd, pos in treeview_data:
-                self.tree.insert('', 'end', values=(hwnd, pos))
+            # Reorder the tuple values to match: Client | HWND | Position
+            for client_label, position, hwnd in treeview_data:
+                self.tree.insert('', 'end', values=(client_label, hwnd, position))
         except Exception as e:
             self.log_action(f"Error refreshing client list: {str(e)}", 'error')
 
