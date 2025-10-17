@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue)
+![Version](https://img.shields.io/badge/version-0.1.1--alpha-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.12-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -48,13 +48,9 @@ TonTonController is an automation tool for Onmyoji (阴阳师) that provides a g
 
 ### 🚀 Quick Start
 
-#### For Users (Pre-built Executable)
-
 1. Download the latest release from [Releases](https://github.com/zee-ellie/tonton-controller/releases)
 2. Extract `TonTonController_vX.X.X-alpha.zip` to any folder
-3. Run `TonTonController.exe`
-4. On first launch, `config.ini` will be created automatically
-5. Launch (Make Sure Onmyoji is already launched) and enjoy!
+3. Run `TonTonController.exe` (Make Sure Onmyoji is already opened) and enjoy!
 
 ### 🖱️ Click Modes
 #### Solo Mode
@@ -64,5 +60,6 @@ TonTonController is an automation tool for Onmyoji (阴阳师) that provides a g
 
 #### Realm Raid Mode
 - Users can select a single client to run the realm raid mode, while performing other tasks in the other clients without interruption.
-- This mode will automatically resize the client back to default for accurate pixel reading.
+- This mode will automatically resize the client back to default for accurate pixel and image reading.
 - Auto-stop feature upon completion (running out of tickets). 
+- This mode can still run during `Froglet Invasion` event.
