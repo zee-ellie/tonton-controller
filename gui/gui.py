@@ -349,54 +349,71 @@ class ClientControlGUI:
     def init_target_window_display(self):
         """
         Initialize target window display after GUI is fully set up.
-        Shows current target window if set, otherwise shows first available window.
+        
+        Behavior:
+        1. If target_window_manager has a saved target HWND:
+        - Try to find that HWND in current window list
+        - If found: Display it in dropdown (e.g., "Client #2 - Top Left...")
+        - If not found: Auto-select Client #1 as new target
+        2. If no saved target:
+        - Auto-select Client #1 (already done by target_window_manager.__init__)
+        
+        The key is that we search by HWND, not by position!
         """
         try:
-            # Get window list
+            # Get sorted window list
             window_list = self.window_fetcher.get_window_info_list()
             
             if not window_list:
                 self.log_action("No windows available for target selection", 'error')
                 return
             
-            # Populate combobox
+            # Populate combobox with sorted list
             self.win_combo['values'] = window_list
             
             # Check if target window manager has a target set
             if self.target_window_manager.has_target_window():
                 target_hwnd = self.target_window_manager.get_target_hwnd()
+                
+                # Get the display string for this HWND
                 target_string = self.target_window_manager.get_target_window_string()
                 
                 if target_string and target_string in window_list:
-                    # Target exists in current window list
+                    # Target exists in current window list - display it
                     self.win_var.set(target_string)
-                    self.log_action(f"✓ Target window loaded: HWND={target_hwnd}", 'success')
+                    
+                    # Extract client number from string for logging
+                    client_num = target_string.split()[1].rstrip(' -')
+                    self.log_action(f"✓ Loaded saved target: {client_num} (HWND={target_hwnd})", 'success')
                 else:
-                    # Target no longer exists, set first window as new target
+                    # Target no longer exists, auto-select Client #1 as new target
                     first_window = window_list[0]
                     self.win_var.set(first_window)
                     
-                    # Automatically set and save the first window as the new target
+                    # Automatically set and save Client #1 as the new target
                     success, message = self.target_window_manager.set_target_window(first_window)
                     if success:
                         new_hwnd = self.window_fetcher.parse_hwnd_from_selection(first_window)
-                        self.log_action(f"Previous target (HWND={target_hwnd}) not found. Auto-selected first window (HWND={new_hwnd})", 'system')
+                        self.log_action(f"Previous target (HWND={target_hwnd}) not found. Auto-selected Client #1 (HWND={new_hwnd})", 'system')
                     else:
                         self.log_action(f"⚠ Previous target (HWND={target_hwnd}) not found, but failed to set new target: {message}", 'error')
             else:
-                # No target set, automatically select and save first window
+                # No target set (shouldn't happen due to auto_set_first_window in __init__)
+                # But handle it just in case
                 first_window = window_list[0]
                 self.win_var.set(first_window)
                 
                 success, message = self.target_window_manager.set_target_window(first_window)
                 if success:
                     new_hwnd = self.window_fetcher.parse_hwnd_from_selection(first_window)
-                    self.log_action(f"Target window auto-selected and saved (HWND={new_hwnd})", 'system')
+                    self.log_action(f"Auto-selected Client #1 as initial target (HWND={new_hwnd})", 'system')
                 else:
                     self.log_action(f"Failed to set initial target: {message}", 'error')
-                
+                    
         except Exception as e:
             self.log_action(f"Error initializing target window display: {e}", 'error')
+            import traceback
+            traceback.print_exc()
 
     def refresh_all_windows(self):
         """Refresh window lists in all tabs"""
@@ -598,6 +615,7 @@ class ClientControlGUI:
         self.root.after(1000, self.check_automation_status)
 
     def start_clicker(self):
+        """Start automation with proper target window handling"""
         mode = self.mode_var.get()
         
         # Check if mode can be started
@@ -619,29 +637,42 @@ class ClientControlGUI:
             self.update_status("Running: Solo", 'green')
 
         elif mode == "Realm Raid":
-            cfg = configparser.ConfigParser()
-            cfg.read(self.CONFIG_PATH, encoding='utf-8')
-            instance_name = cfg.get("GLOBAL", "instance", fallback="")
-
-            if not instance_name:
-                self.log_action("Error: No instance name configured in config.ini", "error")
+            # Get the target HWND from target_window_manager (stored in memory)
+            target_hwnd = self.target_window_manager.get_target_hwnd()
+            
+            if not target_hwnd:
+                self.log_action("Error: No target window set for Realm Raid", "error")
                 self.automation_running = False
+                self.start_btn['state'] = 'normal'
+                self.stop_btn['state'] = 'disabled'
+                self.resize_btn['state'] = 'normal'
+                self.mode_combo['state'] = 'readonly'
                 self.update_status("Error", 'red')
                 return
-
-            hwnd_list = []
-            for win in self.window_fetcher.get_all_windows():
-                if win._hWnd and win.visible:
-                    hwnd_list.append(win)
-
-            if not hwnd_list:
-                self.log_action(f"No active windows found with title: {instance_name}", "error")
+            
+            # Verify the target window still exists
+            target_window = self.window_fetcher.get_window_by_hwnd(target_hwnd)
+            if not target_window:
+                self.log_action(f"Error: Target window (HWND={target_hwnd}) no longer exists", "error")
+                self.log_action("Please refresh windows and select a new target", "error")
                 self.automation_running = False
+                self.start_btn['state'] = 'normal'
+                self.stop_btn['state'] = 'disabled'
+                self.resize_btn['state'] = 'normal'
+                self.mode_combo['state'] = 'readonly'
                 self.update_status("Error", 'red')
                 return
-
-            self.log_action(f"Found {len(hwnd_list)} Realm Raid window(s).", "system")
-            run_rr_mode(self.log_action, self.CONFIG_PATH, self.COORDS_PATH, hwnd_list)
+            
+            # Log which client is being used
+            sorted_windows = self.window_fetcher.get_all_windows_sorted()
+            for idx, win in enumerate(sorted_windows, 1):
+                if win._hWnd == target_hwnd:
+                    self.log_action(f"Using Client #{idx} as target: HWND={target_hwnd}", "system")
+                    self.log_action(f"Window position: ({target_window.left}, {target_window.top})", "system")
+                    break
+            
+            # Pass the specific target HWND to run_rr_mode (NOT a list!)
+            run_rr_mode(self.log_action, self.CONFIG_PATH, self.COORDS_PATH, target_hwnd)
             self.update_status("Running: Realm Raid", 'green')
 
         else:

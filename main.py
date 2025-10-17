@@ -33,19 +33,19 @@ def initialize_config():
     
     # Complete default config with ALL required sections
     default_config = """[GLOBAL]
-instance = Onmyoji
-width = 1152
-party = True
-bounty = True
-mute = False
+    instance = Onmyoji
+    width = 1152
+    party = True
+    bounty = True
+    mute = False
 
-[REFERENCE]
-width = 1152
-height = 679
+    [REFERENCE]
+    width = 1152
+    height = 679
 
-[REALM_RAID]
-target_hwnd = 0
-"""
+    [REALM_RAID]
+    target_hwnd = 0
+    """
     
     # Create config.ini if it doesn't exist
     if not config_file.exists():

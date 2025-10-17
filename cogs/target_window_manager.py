@@ -7,15 +7,12 @@ class TargetWindowManager:
         self.window_fetcher = WindowFetcher(config_path)
         self.target_hwnd = None
         
-        # Try to load saved target from config first
-        loaded = self.load_target_window()
-        
-        # If no saved target, automatically set first available window as default
-        if not loaded:
-            self.auto_set_first_window()
+        # ALWAYS default to Client #1 on launch
+        # HWNDs are temporary and change every game restart
+        self.auto_set_first_window()
     
     def get_window_list(self):
-        """Get formatted list of windows"""
+        """Get formatted list of windows (sorted)"""
         return self.window_fetcher.get_window_info_list()
     
     def parse_hwnd_from_selection(self, selection_string):
@@ -25,22 +22,21 @@ class TargetWindowManager:
     def auto_set_first_window(self):
         """
         Automatically set the first available window as the target.
-        Called on initialization if no saved target exists.
+        Called on initialization - ALWAYS defaults to Client #1 (top-left).
         Returns True if successful, False otherwise.
         """
         try:
-            windows = self.window_fetcher.get_window_info_list()
+            # Get sorted windows (Client #1 will be top-left)
+            windows = self.window_fetcher.get_all_windows_sorted()
+            
             if windows and len(windows) > 0:
-                # Get first window from list
-                first_window_string = windows[0]
-                
-                # Parse HWND from the selection string
-                hwnd = self.parse_hwnd_from_selection(first_window_string)
+                # Get first window (Client #1 - top left)
+                first_window = windows[0]
+                hwnd = first_window._hWnd
                 
                 if hwnd:
                     self.target_hwnd = hwnd
-                    self.save_target_window_to_config()
-                    print(f"[TargetWindowManager] Auto-selected first window: HWND={hwnd}")
+                    print(f"[TargetWindowManager] Auto-selected Client #1 (top-left): HWND={hwnd}, Position=({first_window.left}, {first_window.top})")
                     return True
             
             print(f"[TargetWindowManager] No windows available for auto-selection")
@@ -51,7 +47,10 @@ class TargetWindowManager:
             return False
     
     def set_target_window(self, selection_string):
-        """Set and save the target window"""
+        """
+        Set the target window from dropdown selection.
+        This is only called when user MANUALLY selects a different window.
+        """
         try:
             if not selection_string:
                 return False, "No window selected"
@@ -66,43 +65,18 @@ class TargetWindowManager:
                 return False, "Selected window not found"
             
             self.target_hwnd = hwnd
-            self.save_target_window_to_config()
+            
+            # Log which client number this is
+            sorted_windows = self.window_fetcher.get_all_windows_sorted()
+            for idx, win in enumerate(sorted_windows, 1):
+                if win._hWnd == hwnd:
+                    print(f"[TargetWindowManager] User selected Client #{idx}: HWND={hwnd}, Position=({win.left}, {win.top})")
+                    return True, f"Target window set to Client #{idx}: HWND={hwnd}"
+            
             return True, f"Target window set: HWND={hwnd}"
             
         except Exception as e:
             return False, f"Error setting target window: {e}"
-    
-    def save_target_window_to_config(self):
-        """Save target window to config file"""
-        try:
-            config = configparser.ConfigParser()
-            config.read(self.CONFIG_PATH)
-            
-            if not config.has_section('REALM_RAID'):
-                config.add_section('REALM_RAID')
-                
-            config.set('REALM_RAID', 'target_hwnd', str(self.target_hwnd))
-            
-            with open(self.CONFIG_PATH, 'w') as configfile:
-                config.write(configfile)
-                
-        except Exception as e:
-            raise Exception(f"Error saving target window to config: {e}")
-    
-    def load_target_window(self):
-        """Load target window from config file"""
-        try:
-            config = configparser.ConfigParser()
-            config.read(self.CONFIG_PATH)
-            
-            if config.has_option('REALM_RAID', 'target_hwnd'):
-                hwnd_str = config.get('REALM_RAID', 'target_hwnd')
-                self.target_hwnd = int(hwnd_str)
-                print(f"[TargetWindowManager] Loaded saved target: HWND={self.target_hwnd}")
-                return True
-            return False
-        except Exception:
-            return False
     
     def get_target_hwnd(self):
         """Get the current target HWND"""
@@ -115,24 +89,29 @@ class TargetWindowManager:
         Returns None if no target or window not found.
         
         Format: "Client #1 - Top Left (234, 156) | HWND: 12345"
+        
+        This searches by HWND to find which client it is.
         """
         if not self.target_hwnd:
             return None
         
         try:
-            # Get all windows to find the matching one
-            windows = self.window_fetcher.get_all_windows()
-            window_list = self.window_fetcher.get_window_info_list()
+            # Get sorted windows
+            sorted_windows = self.window_fetcher.get_all_windows_sorted()
             
             # Find the window with matching HWND
-            for idx, win in enumerate(windows):
+            for idx, win in enumerate(sorted_windows, 1):
                 if win._hWnd == self.target_hwnd:
-                    # Return the corresponding formatted string from window_list
-                    if idx < len(window_list):
-                        return window_list[idx]
+                    # Build the display string manually to match get_window_info_list() format
+                    position_label = self.window_fetcher.get_position_label(win.left, win.top)
+                    display_string = f"Client #{idx} - {position_label} ({win.left}, {win.top}) | HWND: {win._hWnd}"
+                    return display_string
             
+            # Target HWND not found in current window list
             return None
-        except Exception:
+            
+        except Exception as e:
+            print(f"[TargetWindowManager] Error getting target window string: {e}")
             return None
     
     def has_target_window(self):
@@ -140,5 +119,5 @@ class TargetWindowManager:
         return self.target_hwnd is not None
     
     def refresh_windows(self):
-        """Refresh window list"""
+        """Refresh window list (sorted)"""
         return self.window_fetcher.refresh_windows()
