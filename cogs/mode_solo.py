@@ -8,6 +8,11 @@ from datetime import datetime
 
 stop_flag = False
 
+def parse_coord(coord_str):
+    """Parse coordinate string like '370, 150' to tuple"""
+    parts = coord_str.split(',')
+    return (int(parts[0].strip()), int(parts[1].strip()))
+
 def click_in_window(hwnd, rel_x, rel_y):
     lParam = win32api.MAKELONG(rel_x, rel_y)
     win32api.PostMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lParam)
@@ -18,20 +23,27 @@ def solo_click_loop(log_action, config_path, coords_path):
     global stop_flag
     stop_flag = False
 
+    # Load coordinates from coords.ini
     coords = configparser.ConfigParser()
-    coords.read(coords_path)
-    base_x = coords.getint("SOLO", "click_x", fallback=1055)
-    base_y = coords.getint("SOLO", "click_y", fallback=61)
+    coords.read(coords_path, encoding='utf-8')
+    
+    # Parse click_solo coordinate (new format: "x, y")
+    click_solo_str = coords.get("SOLO", "click_solo", fallback="1040, 575")
+    base_x, base_y = parse_coord(click_solo_str)
+    
+    # Get interval
     interval = coords.getfloat("SOLO", "interval", fallback=1.5)
 
+    # Load config
     cfg = configparser.ConfigParser()
-    cfg.read(config_path)
+    cfg.read(config_path, encoding='utf-8')
     instance_name = cfg.get("GLOBAL", "instance", fallback="")
 
     if not instance_name:
         log_action("Error: No instance name configured in config.ini", "error")
         return
 
+    # Load reference resolution
     reference_width = cfg.getint("REFERENCE", "width", fallback=1152)
     reference_height = cfg.getint("REFERENCE", "height", fallback=679)
 
@@ -50,9 +62,11 @@ def solo_click_loop(log_action, config_path, coords_path):
         actual_width = win.width
         actual_height = win.height
 
+        # Calculate scaling factors
         scale_x = actual_width / reference_width
         scale_y = actual_height / reference_height
 
+        # Scale coordinates
         rel_x = int(base_x * scale_x)
         rel_y = int(base_y * scale_y)
 
@@ -62,6 +76,7 @@ def solo_click_loop(log_action, config_path, coords_path):
         log_action(f"Error determining click position: {e}", "error")
         return
 
+    # Main click loop
     while not stop_flag:
         windows = gw.getWindowsWithTitle(instance_name)
         for win in windows:
@@ -82,3 +97,4 @@ def run_solo_mode(log_action, config_path, coords_path):
 def stop_solo_mode():
     global stop_flag
     stop_flag = True
+    return True

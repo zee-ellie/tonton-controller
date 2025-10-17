@@ -16,6 +16,14 @@ class ClientControlGUI:
         self.CONFIG_PATH = config_path
         self.COORDS_PATH = coords_path
         self.root = root
+
+        try:
+            import ctypes
+            myappid = 'mycompany.tontontroller.1.0'  # arbitrary string
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except:
+            pass        
+
         self.style = Style(theme='cyborg')
 
         # Initialize WindowFetcher first
@@ -70,6 +78,11 @@ class ClientControlGUI:
         self.root.title("吨吨鼠Controls")
         self.root.geometry("300x400")
         self.root.resizable(False, False)
+
+        try:
+            self.root.iconbitmap('icon.ico')
+        except:
+            pass  # Fail silently if icon not found
         
         # Create notebook (tabs)
         self.notebook = ttk.Notebook(self.root)
