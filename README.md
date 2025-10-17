@@ -2,7 +2,7 @@
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-0.1.0--alpha-blue)
+![Version](https://img.shields.io/badge/version-0.1.1--alpha-blue)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)
 ![Python](https://img.shields.io/badge/python-3.12-green)
 ![License](https://img.shields.io/badge/license-MIT-orange)
@@ -61,4 +61,5 @@ TonTonController is an automation tool for Onmyoji (阴阳师) that provides a g
 #### Realm Raid Mode
 - Users can select a single client to run the realm raid mode, while performing other tasks in the other clients without interruption.
 - This mode will automatically resize the client back to default for accurate pixel and image reading.
-- Auto-stop feature upon completion (running out of tickets). 
+- Auto-stop feature upon completion (running out of tickets).
+- Now supports `Froglet Invasion` Event grids.
