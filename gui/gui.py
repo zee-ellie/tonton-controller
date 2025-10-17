@@ -109,7 +109,7 @@ class ClientControlGUI:
         # Load settings
         self.load_settings()
         
-        # NEW: Initialize target window display BEFORE refreshing all windows
+        # Initialize target window display BEFORE refreshing all windows
         self.init_target_window_display()
         
         # Refresh all window lists after GUI is fully set up
@@ -349,16 +349,6 @@ class ClientControlGUI:
     def init_target_window_display(self):
         """
         Initialize target window display after GUI is fully set up.
-        
-        Behavior:
-        1. If target_window_manager has a saved target HWND:
-        - Try to find that HWND in current window list
-        - If found: Display it in dropdown (e.g., "Client #2 - Top Left...")
-        - If not found: Auto-select Client #1 as new target
-        2. If no saved target:
-        - Auto-select Client #1 (already done by target_window_manager.__init__)
-        
-        The key is that we search by HWND, not by position!
         """
         try:
             # Get sorted window list

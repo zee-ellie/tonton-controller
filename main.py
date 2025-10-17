@@ -15,7 +15,7 @@ def get_application_path():
         return Path(__file__).parent
 
 def get_resource_path(relative_path):
-    """Get absolute path to bundled resource - works for dev and PyInstaller"""
+    """Get absolute path to bundled resource"""
     if getattr(sys, 'frozen', False):
         # Running as compiled executable
         # PyInstaller creates a temp folder and stores path in _MEIPASS
