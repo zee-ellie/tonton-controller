@@ -6,14 +6,18 @@ class WindowFetcher:
     def __init__(self, config_path):
         self.config_path = config_path
         self.config = configparser.ConfigParser()
-        self.config.read(self.config_path)
+        self.config.read(self.config_path, encoding='utf-8') 
         self.instance_name = self.config.get('GLOBAL', 'instance', fallback='')
     
     def get_all_windows(self):
-        """Get all windows matching the instance name"""
+        """Get all windows matching the EXACT instance name"""
         try:
-            windows = gw.getWindowsWithTitle(self.instance_name)
-            return [win for win in windows if win.visible and win._hWnd]
+            all_windows = gw.getAllWindows()
+            windows = [win for win in all_windows 
+                      if win.title == self.instance_name 
+                      and win.visible 
+                      and win._hWnd]
+            return windows
         except Exception:
             return []
     
@@ -30,10 +34,7 @@ class WindowFetcher:
         """
         windows = self.get_all_windows()
         
-        # Sort by Y first (top to bottom), then by X (left to right)
-        # We use a tolerance of 100 pixels for Y to group windows in the same "row"
         def sort_key(win):
-            # Round Y to nearest 100 to group windows in same row
             row = win.top // 100
             return (row, win.left)
         

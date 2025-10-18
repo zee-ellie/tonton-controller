@@ -430,11 +430,20 @@ class RealmRaidAutomation:
         print(f"\n📐 Window Size Check:")
         print(f"   Current WINDOW size:  {current_window_width}x{current_window_height}")
         print(f"   Current CLIENT size:  {current_client_width}x{current_client_height}")
-        print(f"   Reference WINDOW:     {self.reference_width}x{self.reference_height}")
+        print(f"   Reference CLIENT:     {self.reference_width}x{self.reference_height}")
         
-        if current_window_width != self.reference_width:
-            print(f"\n⚠️  Window width mismatch detected!")
-            self.log(f"Window width is {current_window_width}, resizing to {self.reference_width}", 'system')
+        # ✅ FIXED: Compare CLIENT width, not WINDOW width
+        if current_client_width != self.reference_width:
+            print(f"\n⚠️  Client width mismatch detected!")
+            self.log(f"Client width is {current_client_width}, resizing to {self.reference_width}", 'system')
+            
+            # Calculate border sizes
+            border_width = current_window_width - current_client_width
+            border_height = current_window_height - current_client_height
+            
+            # Calculate target WINDOW size to achieve reference CLIENT size
+            target_window_width = self.reference_width + border_width
+            target_window_height = self.reference_height + border_height
             
             window_rect = wintypes.RECT()
             user32.GetWindowRect(hwnd, ctypes.byref(window_rect))
@@ -442,7 +451,7 @@ class RealmRaidAutomation:
             success = user32.SetWindowPos(
                 hwnd, 0,
                 window_rect.left, window_rect.top,
-                self.reference_width, self.reference_height,
+                target_window_width, target_window_height,
                 0x0004
             )
             
@@ -450,10 +459,12 @@ class RealmRaidAutomation:
                 time.sleep(0.5)
                 
                 new_window_width, new_window_height = self.get_window_outer_size(hwnd)
+                new_client_width, new_client_height = self.get_window_size(hwnd)
                 
                 print(f"\n✓ Window resized successfully!")
                 print(f"   New WINDOW size: {new_window_width}x{new_window_height}")
-                self.log(f"Window resized to {new_window_width}x{new_window_height}", 'success')
+                print(f"   New CLIENT size: {new_client_width}x{new_client_height}")
+                self.log(f"Window resized to CLIENT {new_client_width}x{new_client_height}", 'success')
                 
                 print(f"\n⏳ Waiting for game to re-render UI...")
                 self.log("Waiting 1 second for game UI to stabilize", 'system')
@@ -470,13 +481,13 @@ class RealmRaidAutomation:
                 self.log("Failed to resize window", 'error')
                 return False
         else:
-            print(f"✓ Window size is correct")
-            self.log("Window size matches reference resolution", 'success')
+            print(f"✓ Client width is correct")
+            self.log("Client size matches reference resolution", 'success')
         
         return True
     
     def restore_window_size(self):
-        """Restore window to target width from config.ini"""
+        """Restore window to target CLIENT width from config.ini"""
         if not self.hwnd_for_resize or not self.original_window_width:
             print(f"\n⚠️  No window resize data available")
             return
@@ -485,34 +496,67 @@ class RealmRaidAutomation:
         
         print(f"\n🔄 RESTORING WINDOW SIZE")
         
-        aspect_ratio = self.original_window_height / self.original_window_width
-        target_height = int(self.target_restore_width * aspect_ratio)
-        
+        # Get current CLIENT size
+        current_client_width, current_client_height = self.get_window_size(hwnd)
         current_window_width, current_window_height = self.get_window_outer_size(hwnd)
         
-        if current_window_width == self.target_restore_width:
-            print(f"✓ Window already at target width")
-            self.log("Window already at target width", 'success')
-        else:
-            self.log(f"Restoring window to {self.target_restore_width}x{target_height}", 'system')
+        print(f"   Current CLIENT: {current_client_width}x{current_client_height}")
+        print(f"   Target CLIENT:  {self.target_restore_width}x???")
+        
+        # Check if already at target CLIENT width
+        if current_client_width == self.target_restore_width:
+            print(f"✓ Client already at target width")
+            self.log("Client already at target width", 'success')
+            return
+        
+        # Calculate aspect ratio based on REFERENCE resolution
+        aspect_ratio = self.reference_height / self.reference_width
+        target_client_height = int(self.target_restore_width * aspect_ratio)
+        
+        print(f"   Target CLIENT:  {self.target_restore_width}x{target_client_height}")
+        
+        # Calculate border sizes
+        border_width = current_window_width - current_client_width
+        border_height = current_window_height - current_client_height
+        
+        # Calculate WINDOW size needed to achieve target CLIENT size
+        target_window_width = self.target_restore_width + border_width
+        target_window_height = target_client_height + border_height
+        
+        print(f"   Border size:    {border_width}x{border_height}")
+        print(f"   Target WINDOW:  {target_window_width}x{target_window_height}")
+        
+        self.log(f"Restoring CLIENT to {self.target_restore_width}x{target_client_height}", 'system')
+        
+        window_rect = wintypes.RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(window_rect))
+        
+        success = user32.SetWindowPos(
+            hwnd, 0,
+            window_rect.left, window_rect.top,
+            target_window_width, target_window_height,
+            0x0004
+        )
+        
+        if success:
+            time.sleep(0.3)
             
-            window_rect = wintypes.RECT()
-            user32.GetWindowRect(hwnd, ctypes.byref(window_rect))
+            # Verify CLIENT size
+            new_client_width, new_client_height = self.get_window_size(hwnd)
+            new_window_width, new_window_height = self.get_window_outer_size(hwnd)
             
-            success = user32.SetWindowPos(
-                hwnd, 0,
-                window_rect.left, window_rect.top,
-                self.target_restore_width, target_height,
-                0x0004
-            )
+            print(f"✓ Window restored!")
+            print(f"   New WINDOW: {new_window_width}x{new_window_height}")
+            print(f"   New CLIENT: {new_client_width}x{new_client_height}")
             
-            if success:
-                time.sleep(0.3)
-                print(f"✓ Window restored successfully!")
-                self.log(f"Window restored", 'success')
+            if new_client_width == self.target_restore_width:
+                self.log(f"CLIENT restored to {new_client_width}x{new_client_height} (exact)", 'success')
             else:
-                print(f"✗ Failed to restore window")
-                self.log("Failed to restore window size", 'error')
+                self.log(f"CLIENT restored to {new_client_width}x{new_client_height} "
+                        f"(off by {new_client_width - self.target_restore_width}px)", 'error')
+        else:
+            print(f"✗ Failed to restore window")
+            self.log("Failed to restore window size", 'error')
     
     def check_initial_grid(self, hwnd):
         """Check all 9 grid positions using hybrid image detection"""

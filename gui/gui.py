@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk
 from ttkbootstrap import Style, dialogs
 import configparser
+import ctypes
+import sys
 from cogs.window_manager import resize_all_clients
 from cogs.mode_solo import run_solo_mode, stop_solo_mode
 from cogs.mode_rr import run_rr_mode, stop_rr_mode
@@ -10,6 +12,22 @@ from cogs.target_window_manager import TargetWindowManager
 from cogs.mode_manager import ModeManager
 from cogs.window_fetcher import WindowFetcher
 from cogs.window_settings_manager import WindowSettingsManager
+from cogs.sleep_manager import SleepManager
+
+def make_dpi_aware():
+    """Make the application DPI-aware on Windows"""
+    if sys.platform == 'win32':
+        try:
+            # Try to set DPI awareness (Windows 8.1+)
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_SYSTEM_DPI_AWARE
+            print("✓ DPI awareness enabled (SetProcessDpiAwareness)")
+        except Exception:
+            try:
+                # Fallback for Windows Vista/7/8
+                ctypes.windll.user32.SetProcessDPIAware()
+                print("✓ DPI awareness enabled (SetProcessDPIAware)")
+            except Exception as e:
+                print(f"⚠️  Could not enable DPI awareness: {e}")
 
 class ClientControlGUI:
     def __init__(self, root, config_path, coords_path):
@@ -27,6 +45,9 @@ class ClientControlGUI:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
         except:
             pass        
+        
+        self.dpi_scale = self.get_dpi_scale()
+        print(f"📊 DPI Scaling: {self.dpi_scale * 100:.0f}%")
 
         self.style = Style(theme='cyborg')
 
@@ -38,6 +59,7 @@ class ClientControlGUI:
         self.target_window_manager = TargetWindowManager(config_path)
         self.mode_manager = ModeManager(self.target_window_manager, config_path)
         self.window_settings_manager = WindowSettingsManager(config_path)
+        self.sleep_manager = SleepManager()
 
         # Initialize stored HWND
         self.current_coord_hwnd = None
@@ -51,36 +73,107 @@ class ClientControlGUI:
             
         self.setup_gui()
 
+    def get_dpi_scale(self):
+        """Get the current DPI scaling factor"""
+        try:
+            import ctypes
+            # Get DPI for the main screen
+            hdc = ctypes.windll.user32.GetDC(0)
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+            ctypes.windll.user32.ReleaseDC(0, hdc)
+            
+            # Standard DPI is 96, so scaling factor is dpi/96
+            scale = dpi / 96.0
+            return scale
+        except Exception as e:
+            print(f"⚠️  Error getting DPI scale: {e}")
+            return 1.0  # Default to 100% scaling
+
     def validate_initial_setup(self):
-        """Validate that required windows exist"""
-        config = configparser.ConfigParser()
-        config.read(self.CONFIG_PATH)
-        instance_name = config.get('GLOBAL', 'instance', fallback='')
-        
-        if not instance_name:
+        """Validate that required windows exist - with proper UTF-8 handling"""
+        try:
+            config = configparser.ConfigParser()
+            config.read(self.CONFIG_PATH, encoding='utf-8')
+            instance_name = config.get('GLOBAL', 'instance', fallback='')
+            
+            if not instance_name:
+                dialogs.Messagebox.show_error(
+                    title="Config Error",
+                    message="'instance' not found in config.ini\n\n"
+                           "Please add:\n"
+                           "[GLOBAL]\n"
+                           "instance = 陰陽師Onmyoji",
+                    parent=self.root
+                )
+                self.root.destroy()
+                return False
+            
+            import pygetwindow as gw
+            all_windows = gw.getAllWindows()
+            windows = [w for w in all_windows if w.title == instance_name]
+            
+            if not windows:
+                # Show helpful error with actual title expected
+                error_message = (
+                    f"No window found with exact title:\n"
+                    f"'{instance_name}'\n\n"
+                    f"Please:\n"
+                    f"1. Launch the game first\n"
+                    f"2. Make sure config.ini is saved as UTF-8 encoding\n"
+                    f"3. Verify the window title exactly matches\n\n"
+                    f"Expected: 陰陽師Onmyoji"
+                )
+                
+                partial_matches = [w for w in all_windows 
+                                  if "Onmyoji" in w.title or "陰陽" in w.title]
+                if partial_matches:
+                    error_message += f"\n\nFound similar windows:\n"
+                    for w in partial_matches[:3]:  # Show max 3
+                        error_message += f"  - '{w.title}'\n"
+                    error_message += "\nIf one of these is correct, update config.ini"
+                
+                dialogs.Messagebox.show_error(
+                    title="Window Not Found",
+                    message=error_message,
+                    parent=self.root
+                )
+                self.root.destroy()
+                return False
+            
+            self.log_action(f"Found {len(windows)} window(s) with title: '{instance_name}'", 'success')
+            return True
+            
+        except UnicodeDecodeError as e:
             dialogs.Messagebox.show_error(
-                title="Config Error",
-                message="'instance' not found in config.ini",
+                title="Encoding Error",
+                message=f"Error reading config.ini:\n{e}\n\n"
+                       "Make sure config.ini is saved as UTF-8 encoding!\n\n"
+                       "In Notepad: Save As → Encoding: UTF-8\n"
+                       "In VS Code: Bottom right corner should show 'UTF-8'",
                 parent=self.root
             )
             self.root.destroy()
             return False
             
-        windows = self.window_fetcher.get_all_windows()
-        if not windows:
+        except Exception as e:
             dialogs.Messagebox.show_error(
-                title="Window Not Found",
-                message=f"No window found with title: '{instance_name}'\nPlease launch the game first.",
+                title="Validation Error",
+                message=f"Error during validation:\n{e}",
                 parent=self.root
             )
             self.root.destroy()
             return False
-        
-        return True
 
     def setup_gui(self):
         self.root.title("吨吨鼠Controls")
-        self.root.geometry("300x400")
+        
+        # Scale window size based on DPI
+        base_width = 300
+        base_height = 400
+        scaled_width = int(base_width * self.dpi_scale)
+        scaled_height = int(base_height * self.dpi_scale)
+        
+        self.root.geometry(f"{scaled_width}x{scaled_height}")
         self.root.resizable(False, False)
 
         try:
@@ -88,6 +181,7 @@ class ClientControlGUI:
         except:
             pass  # Fail silently if icon not found
         
+        # Rest of your setup_gui code...
         # Create notebook (tabs)
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill='both', expand=True)
@@ -588,6 +682,9 @@ class ClientControlGUI:
             elif self.automation_running and not _rr_running:
                 # Automation stopped (likely due to error or completion)
                 self.automation_running = False
+                self.sleep_manager.allow_sleep()
+                self.log_action("Sleep prevention disabled - automation completed", 'system')
+
                 self.start_btn['state'] = 'normal'
                 self.stop_btn['state'] = 'disabled'
                 self.resize_btn['state'] = 'normal'
@@ -620,6 +717,12 @@ class ClientControlGUI:
         
         self.log_action(f"Starting mode: {mode}", 'control')
         self.automation_running = True
+
+        if self.sleep_manager.prevent_sleep():
+            self.log_action("Sleep prevention enabled - system will stay awake", 'system')
+        else:
+            self.log_action("Warning: Could not prevent sleep", 'error')
+
         self.start_btn['state'] = 'disabled'
         self.stop_btn['state'] = 'normal'
         self.resize_btn['state'] = 'disabled'
@@ -637,6 +740,7 @@ class ClientControlGUI:
             if not target_hwnd:
                 self.log_action("Error: No target window set for Realm Raid", "error")
                 self.automation_running = False
+                self.sleep_manager.allow_sleep()
                 self.start_btn['state'] = 'normal'
                 self.stop_btn['state'] = 'disabled'
                 self.resize_btn['state'] = 'normal'
@@ -672,6 +776,8 @@ class ClientControlGUI:
         else:
             self.log_action(f"Mode '{mode}' not implemented yet.", 'error')
             self.automation_running = False
+            self.sleep_manager.allow_sleep()
+            self.log_action("Sleep prevention disabled", 'system')
             self.update_status("Error", 'red')
 
     def stop_clicker(self):
@@ -692,6 +798,9 @@ class ClientControlGUI:
             self.log_action(f"Mode '{mode}' not implemented yet.", 'error')
 
         self.automation_running = False
+        self.sleep_manager.allow_sleep()
+        self.log_action("Sleep prevention disabled - system can sleep normally", 'system')
+
         self.start_btn['state'] = 'normal'
         self.resize_btn['state'] = 'normal'
         self.stop_btn['state'] = 'disabled'
@@ -755,28 +864,46 @@ class ClientControlGUI:
     def resize_windows(self, action_label="Resizing client windows", update_buttons=True):
         """Unified method to resize all windows"""
         try:
-            success = resize_all_clients(self.log_action, action_label=action_label)
+            success = resize_all_clients(
+                self.log_action, 
+                config_path=self.CONFIG_PATH,  # ✅ Pass the config path!
+                action_label=action_label
+            )
             
-            if success and update_buttons:
-                self.start_btn['state'] = 'normal'
-                self.resize_btn['state'] = 'normal'
-                if "Setting window size" in action_label:
-                    self.set_size_btn['state'] = 'disabled'
-                    self.mode_combo['state'] = 'readonly'  # Enable mode dropdown when Set Size becomes inactive
+            if success:
+                self.log_action("Window resize completed successfully", 'success')
+                
+                if update_buttons:
+                    self.start_btn['state'] = 'normal'
+                    self.resize_btn['state'] = 'normal'
+                    if "Setting window size" in action_label:
+                        self.set_size_btn['state'] = 'disabled'
+                        self.mode_combo['state'] = 'readonly'
+            else:
+                self.log_action("Window resize failed", 'error')
             
             return success
             
         except Exception as e:
             self.log_action(f"Error during resize operation: {e}", 'error')
+            import traceback
+            traceback.print_exc()
             return False
 
     def resize_clients(self):
         """Manual resize clients"""
+        self.log_action("Manual resize requested", 'control')
         self.resize_windows(action_label="Resizing client windows", update_buttons=True)
 
     def set_size(self):
         """Initial window size setup"""
-        self.resize_windows(action_label="Setting window size for all clients", update_buttons=True)
+        self.log_action("Set Size button clicked", 'control')
+        success = self.resize_windows(action_label="Setting window size for all clients", update_buttons=True)
+    
+        if success:
+            self.log_action("Set Size completed - Start button enabled", 'success')
+        else:
+            self.log_action("Set Size failed - please check logs", 'error')
 
     def resize_windows_after_width_change(self):
         """Resize after width change"""
@@ -803,7 +930,7 @@ class ClientControlGUI:
         """Load settings from config"""
         try:
             cfg = configparser.ConfigParser()
-            cfg.read(self.CONFIG_PATH, encoding='utf-8')
+            cfg.read(self.CONFIG_PATH, encoding='utf-8')  # Add encoding='utf-8'
             
             if cfg.has_section('GLOBAL'):
                 self.party_default.set(cfg.getboolean('GLOBAL', 'party', fallback=True))
