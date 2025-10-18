@@ -8,8 +8,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('cogs/coords.ini', 'cogs'),  # Bundle coords.ini (read-only)
-        # Add other NON-CODE resources here if needed
-        # ('assets/*.png', 'assets'),  # Example: images
+        ('cogs/ref', 'cogs/ref')
     ],
     hiddenimports=[
         # GUI modules

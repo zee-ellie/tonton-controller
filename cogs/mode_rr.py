@@ -41,7 +41,7 @@ class RealmRaidAutomation:
     FROGLET_LOAD_TIME = 2.0
     # ==============================================================
     
-    def __init__(self, log_func, config_path, coords_path, target_hwnd):
+    def __init__(self, log_func, config_path, coords_path, target_hwnd, ref_path):
         """
         Args:
             log_func: Logging function
@@ -52,7 +52,8 @@ class RealmRaidAutomation:
         self.log_func = log_func
         self.config_path = config_path
         self.coords_path = coords_path
-        self.target_hwnd = target_hwnd  # Store the specific target HWND
+        self.target_hwnd = target_hwnd
+        self.ref_path = ref_path
         self.running = False
         
         # Initialize templates dict FIRST
@@ -86,10 +87,16 @@ class RealmRaidAutomation:
         self.log_func(message, tag)
     
     def load_templates(self):
-        """Load template images for detection"""
-        template_dir = os.path.join('cogs', 'ref')
+        """Load template images for detection - UNICODE PATH SAFE"""
+        template_dir = self.ref_path
         
         print(f"\n📂 Loading template images from: {template_dir}")
+        
+        # Check if path contains non-ASCII characters
+        path_str = str(template_dir)
+        if not path_str.isascii():
+            print(f"⚠️  Path contains non-ASCII characters (Chinese/Unicode)")
+            print(f"⚠️  Using NumPy buffer method to handle Unicode paths")
         
         if not os.path.exists(template_dir):
             error_msg = f"Template directory not found: {template_dir}"
@@ -114,15 +121,42 @@ class RealmRaidAutomation:
                 missing_files.append(filepath)
                 continue
             
-            template = cv2.imread(filepath)
-            if template is None:
-                print(f"  ❌ Failed to load: {filepath}")
-                self.log(f"ERROR: Failed to load template: {filepath}", 'error')
-                raise ValueError(f"Failed to load template: {filepath}")
-            
-            self.templates[key] = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-            h, w = self.templates[key].shape[:2]
-            print(f"  ✓ Loaded '{key}': {filename} ({w}x{h})")
+            try:
+                # UNICODE-SAFE IMAGE LOADING
+                # cv2.imread() fails silently with non-ASCII paths (Chinese, etc.)
+                # Use numpy buffer method instead
+                print(f"\n  Loading '{key}' ({filename})...")
+                
+                # Read file as binary (Python handles Unicode paths correctly)
+                with open(filepath, 'rb') as f:
+                    file_data = f.read()
+                
+                print(f"    ✓ Read {len(file_data)} bytes from disk")
+                
+                # Convert to numpy array
+                np_arr = np.frombuffer(file_data, np.uint8)
+                
+                # Decode with OpenCV (works because using buffer, not path)
+                template = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                
+                if template is None:
+                    print(f"    ❌ cv2.imdecode() returned None")
+                    print(f"    File may be corrupted or not a valid PNG")
+                    self.log(f"ERROR: Failed to decode template: {filepath}", 'error')
+                    raise ValueError(f"Failed to decode template: {filepath}")
+                
+                # Convert to grayscale for template matching
+                self.templates[key] = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
+                h, w = self.templates[key].shape[:2]
+                print(f"    ✓ Loaded successfully: {w}x{h} pixels")
+                
+            except Exception as e:
+                print(f"  ❌ Error loading {filepath}")
+                print(f"    Error: {e}")
+                import traceback
+                traceback.print_exc()
+                self.log(f"ERROR: Failed to load template {filepath}: {e}", 'error')
+                raise
         
         if missing_files:
             error_msg = f"Missing {len(missing_files)} template file(s):\n"
@@ -132,6 +166,7 @@ class RealmRaidAutomation:
             self.log(f"ERROR: {error_msg}", 'error')
             raise FileNotFoundError(error_msg)
         
+        print(f"\n✅ Successfully loaded {len(self.templates)} template images")
         self.log(f"Loaded {len(self.templates)} template images", 'success')
     
     def capture_full_window(self, hwnd):
@@ -952,7 +987,7 @@ class RealmRaidAutomation:
         
         return False
     
-def run_rr_mode(log_func, config_path, coords_path, target_hwnd):
+def run_rr_mode(log_func, config_path, coords_path, target_hwnd, ref_path):
     """Start Realm Raid mode with the specified target window
     
     Args:
@@ -972,7 +1007,8 @@ def run_rr_mode(log_func, config_path, coords_path, target_hwnd):
         log_func, 
         config_path, 
         coords_path, 
-        target_hwnd  # Pass the specific HWND, not a list!
+        target_hwnd,
+        ref_path
     )
     
     def thread_target():

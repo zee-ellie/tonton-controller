@@ -17,6 +17,10 @@ class ClientControlGUI:
         self.COORDS_PATH = coords_path
         self.root = root
 
+        from main import get_resource_path
+        import os
+        self.REF_PATH = str(get_resource_path(os.path.join('cogs', 'ref')))
+
         try:
             import ctypes
             myappid = 'mycompany.tontontroller.1.0'  # arbitrary string
@@ -662,7 +666,7 @@ class ClientControlGUI:
                     break
             
             # Pass the specific target HWND to run_rr_mode (NOT a list!)
-            run_rr_mode(self.log_action, self.CONFIG_PATH, self.COORDS_PATH, target_hwnd)
+            run_rr_mode(self.log_action, self.CONFIG_PATH, self.COORDS_PATH, target_hwnd, self.REF_PATH)
             self.update_status("Running: Realm Raid", 'green')
 
         else:
