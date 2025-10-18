@@ -62,11 +62,38 @@ def initialize_config():
     
     return config_file
 
+def verify_templates():
+    """Verify that template images exist"""
+    template_dir = get_resource_path('cogs/ref')
+    
+    required_templates = ['rr_ko.png', 'rr_fail.png', 'rr_froglet.png']
+    
+    if not template_dir.exists():
+        print(f"⚠️  WARNING: Template directory not found at {template_dir}")
+        print("Realm Raid mode will not work without template images.")
+        return False
+    
+    missing = []
+    for template in required_templates:
+        template_path = template_dir / template
+        if not template_path.exists():
+            missing.append(template)
+    
+    if missing:
+        print(f"⚠️  WARNING: Missing template images: {', '.join(missing)}")
+        print(f"Template directory: {template_dir}")
+        print("Realm Raid mode will not work without these images.")
+        return False
+    
+    print(f"✓ All template images found at {template_dir}")
+    return True
+
 def main():
     try:
         # Get paths
         config_path = initialize_config()  # External, editable
         coords_path = get_resource_path('cogs/coords.ini')  # Bundled, read-only
+        ref_path = get_resource_path('cogs/ref') # Template images
         
         # Verify coords.ini exists
         if not coords_path.exists():
@@ -76,6 +103,9 @@ def main():
             sys.exit(1)
         
         print(f"✓ Using coords.ini at {coords_path}")
+        
+        # Verify templates exist (NEW)
+        verify_templates()
         
         # Initialize GUI
         root = tk.Tk()
