@@ -555,8 +555,6 @@ class RealmRaidAutomation:
     
     def check_initial_grid(self, hwnd):
         """Check all 9 grid positions using hybrid image detection"""
-        global _rr_running
-        
         print("\n" + "="*60)
         print("🔍 HYBRID GRID STATE CHECK")
         print("="*60)
@@ -573,7 +571,7 @@ class RealmRaidAutomation:
         print(f"  • Froglet threshold: 0.75\n")
         
         for key in ['11', '12', '13', '21', '22', '23', '31', '32', '33']:
-            if not self.running or not _rr_running:
+            if not self.running:
                 print(f"[STOP] Stop detected during grid check")
                 return False
             
@@ -635,8 +633,6 @@ class RealmRaidAutomation:
     
     def process_single_match(self, hwnd, position_key):
         """Process a single match from start to completion"""
-        global _rr_running
-        
         print(f"\n{'='*60}")
         print(f"🎮 PROCESSING MATCH: Position {position_key}")
         print(f"{'='*60}")
@@ -656,7 +652,7 @@ class RealmRaidAutomation:
         # Step 1: Expand match
         print(f"\n🔹 STEP 1: Expanding match")
         for attempt in range(self.max_retries):
-            if not self.running or not _rr_running:
+            if not self.running:
                 return False
             
             self.send_click(hwnd, coord_1[0], coord_1[1])
@@ -678,7 +674,7 @@ class RealmRaidAutomation:
         # Step 2: Join match
         print(f"\n🔹 STEP 2: Joining match")
         for attempt in range(self.max_retries):
-            if not self.running or not _rr_running:
+            if not self.running:
                 return False
             
             self.send_click(hwnd, coord_2[0], coord_2[1])
@@ -728,7 +724,7 @@ class RealmRaidAutomation:
         froglet_x, froglet_y = self.coord_froglet_click if is_froglet else (None, None)
         
         while time.time() - start_time < self.match_timeout:
-            if not self.running or not _rr_running:
+            if not self.running:
                 return False
             
             # For froglet matches, click continuously
@@ -780,10 +776,7 @@ class RealmRaidAutomation:
 
     def run(self):
         """Main automation loop"""
-        global _rr_running
-        
         self.running = True
-        _rr_running = True
         
         print("\n" + "="*60)
         print("[START] Realm Raid Automation Starting")
@@ -799,23 +792,20 @@ class RealmRaidAutomation:
             if not win32gui.IsWindow(hwnd):
                 self.log("Target window no longer exists!", 'error')
                 self.running = False
-                _rr_running = False
                 return
         except:
             self.log("Cannot access target window", 'error')
             self.running = False
-            _rr_running = False
             return
-        
+
         if not self.resize_window_to_reference(hwnd):
             self.log("Window resize failed", 'error')
             self.running = False
-            _rr_running = False
             return
         
         try:
-            while self.running and _rr_running:
-                if not self.running or not _rr_running:
+            while self.running:
+                if not self.running:
                     break
                 
                 self.log("Starting new page scan...", 'system')
@@ -843,7 +833,7 @@ class RealmRaidAutomation:
                         break
                 
                 for idx, position in enumerate(self.available_matches[:], 1):
-                    if not self.running or not _rr_running:
+                    if not self.running:
                         break
                     
                     self.log(f"Match {idx}/{len(self.available_matches)}: Position {position}", 'control')
@@ -854,17 +844,16 @@ class RealmRaidAutomation:
                         # Stop flag already set in process_single_match
                         # Just restore window and exit cleanly
                         self.running = False
-                        _rr_running = False
                         break  # Exit the for loop
                     elif not result:
                         self.log(f"Failed to process {position}", 'error')
                         continue
                 
                 # Check if we broke out due to entry exhaustion
-                if not self.running or not _rr_running:
+                if not self.running:
                     break
                 
-                if self.running and _rr_running:
+                if self.running:
                     if self.fail_matches:
                         if not self.refresh_page_if_needed(hwnd):
                             break
@@ -874,7 +863,7 @@ class RealmRaidAutomation:
                 self.froglet_matches = []
                 self.available_matches = []
                 
-                if self.running and _rr_running:
+                if self.running:
                     if not self.interruptible_sleep(self.PAGE_CYCLE_WAIT):
                         break
                 
@@ -887,8 +876,7 @@ class RealmRaidAutomation:
             self.restore_window_size()
             
             self.running = False
-            _rr_running = False
-            
+
             # Single final log message
             print("\n" + "="*60)
             print(f"[END] Realm Raid automation stopped - Total matches: {self.total_complete}")
@@ -918,14 +906,12 @@ class RealmRaidAutomation:
     
     def wait_for_lobby_return(self, hwnd):
         """Wait for return to lobby"""
-        global _rr_running
-        
         print(f"\n🔹 Returning to lobby...")
         self.log("Waiting for return to lobby", 'system')
         
         max_attempts = 10
         for attempt in range(max_attempts):
-            if not self.running or not _rr_running:
+            if not self.running:
                 return False
             
             color = self.get_pixel_color(hwnd, self.coord_click_refresh[0], self.coord_click_refresh[1])
@@ -944,8 +930,6 @@ class RealmRaidAutomation:
     
     def refresh_page_if_needed(self, hwnd):
         """Check if refresh needed based on Fail matches"""
-        global _rr_running
-        
         if not self.fail_matches:
             self.log("No Fail matches - skipping refresh check", 'system')
             return True
@@ -972,10 +956,8 @@ class RealmRaidAutomation:
     
     def handle_confirm_button(self, hwnd):
         """Click confirm button with retry"""
-        global _rr_running
-        
         for attempt in range(self.max_retries):
-            if not self.running or not _rr_running:
+            if not self.running:
                 return False
             
             color = self.get_pixel_color(hwnd, self.coord_click_confirm[0], self.coord_click_confirm[1])
@@ -999,11 +981,9 @@ class RealmRaidAutomation:
     
     def wait_for_confirm_cooldown(self, hwnd):
         """Wait for confirm button cooldown"""
-        global _rr_running
-        
         self.log("Waiting for confirm cooldown...", 'system')
         
-        while self.running and _rr_running:
+        while self.running:
             color = self.get_pixel_color(hwnd, self.coord_click_confirm[0], self.coord_click_confirm[1])
             
             if self.color_matches(color, self.color_btn):

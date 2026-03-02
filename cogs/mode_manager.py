@@ -12,7 +12,8 @@ class ModeManager:
             'Realm Raid': {'needs_target_window': True},
             'Guild Realm Raid': {'needs_target_window': True},
             'Ultra Encounter': {'needs_target_window': False},
-            'Encounter': {'needs_target_window': False}
+            'Encounter': {'needs_target_window': False},
+            'Realm Raid-All': {'needs_target_window': False}
         }
     
     def set_mode(self, mode_name):
@@ -168,6 +169,7 @@ class ModeManager:
             'Team Join': 1,
             'Realm Raid': 3,
             'Guild Realm Raid': 3,
+            'Realm Raid-All': 3,
             'Ultra Encounter': 1,
             'Encounter': 1
         }
