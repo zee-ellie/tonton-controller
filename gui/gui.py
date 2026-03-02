@@ -8,6 +8,7 @@ import threading
 from cogs.window_manager import resize_all_clients
 from cogs.mode_solo import run_solo_mode, stop_solo_mode
 from cogs.mode_rr import run_rr_mode, stop_rr_mode, is_rr_running
+from cogs.mode_rr_all import run_rr_all_mode, stop_rr_all_mode, is_rr_all_running
 from cogs.coord_finder import CoordinateFinder
 from cogs.target_window_manager import TargetWindowManager
 from cogs.mode_manager import ModeManager
@@ -229,7 +230,7 @@ class ClientControlGUI:
         self.mode_combo = ttk.Combobox(
             mode_frame, 
             textvariable=self.mode_var,
-            values=['Solo', 'Team Host (2P)', 'Team Join', "Realm Raid", "Guild Realm Raid", "Ultra Encounter", "Encounter"],
+            values=['Solo', 'Team Host (2P)', 'Team Join', "Realm Raid", "Realm Raid-All", "Guild Realm Raid", "Ultra Encounter", "Encounter"],
             state='readonly'
         )
         self.mode_combo.current(0)
@@ -692,6 +693,22 @@ class ClientControlGUI:
                 self.log_action("Automation stopped (check logs for details)", 'system')
             else:
                 self.update_status("Idle", 'gray')
+        elif mode == "Realm Raid-All":
+            rr_all_active = is_rr_all_running()
+            if rr_all_active and self.automation_running:
+                self.update_status("Running: Realm Raid-All", 'green')
+            elif self.automation_running and not rr_all_active:
+                self.automation_running = False
+                self.sleep_manager.allow_sleep()
+                self.log_action("Sleep prevention disabled - automation completed", 'system')
+                self.start_btn['state'] = 'normal'
+                self.stop_btn['state'] = 'disabled'
+                self.resize_btn['state'] = 'normal'
+                self.mode_combo['state'] = 'readonly'
+                self.update_status("Stopped", 'red')
+                self.log_action("Realm Raid-All completed", 'system')
+            else:
+                self.update_status("Idle", 'gray')
         elif mode == "Solo":
             # Add Solo mode status checking if needed
             if self.automation_running:
@@ -772,6 +789,10 @@ class ClientControlGUI:
             run_rr_mode(self.log_action, self.CONFIG_PATH, self.COORDS_PATH, target_hwnd, self.REF_PATH)
             self.update_status("Running: Realm Raid", 'green')
 
+        elif mode == "Realm Raid-All":
+            run_rr_all_mode(self.log_action, self.CONFIG_PATH, self.COORDS_PATH, self.REF_PATH)
+            self.update_status("Running: Realm Raid-All", 'green')
+
         else:
             self.log_action(f"Mode '{mode}' not implemented yet.", 'error')
             self.automation_running = False
@@ -793,6 +814,12 @@ class ClientControlGUI:
                 self.log_action("Stop signal sent to Realm Raid automation", 'system')
             else:
                 self.log_action("No active Realm Raid automation to stop", 'error')
+        elif mode == "Realm Raid-All":
+            stop_success = stop_rr_all_mode()
+            if stop_success:
+                self.log_action("Stop signal sent to all Realm Raid instances", 'system')
+            else:
+                self.log_action("No active Realm Raid-All automation to stop", 'error')
         else:
             self.log_action(f"Mode '{mode}' not implemented yet.", 'error')
 
