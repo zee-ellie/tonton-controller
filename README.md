@@ -50,7 +50,7 @@ TonTonController is an automation tool for Onmyoji (阴阳师) that provides a g
 ### 🚀 Quick Start
 
 1. Download the latest release from [Releases](https://github.com/zee-ellie/tonton-controller/releases)
-2. Extract `TonTonController_vX.X.X-alpha.zip` to any folder
+2. Extract `TonTonController_vX.X.X.zip` to any folder
 3. Run `TonTonController.exe` (Make Sure Onmyoji is already opened) and enjoy!
 
 ### 🖱️ Click Modes
