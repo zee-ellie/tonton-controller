@@ -4,9 +4,10 @@ from ttkbootstrap import Style, dialogs
 import configparser
 import ctypes
 import sys
+import threading
 from cogs.window_manager import resize_all_clients
 from cogs.mode_solo import run_solo_mode, stop_solo_mode
-from cogs.mode_rr import run_rr_mode, stop_rr_mode
+from cogs.mode_rr import run_rr_mode, stop_rr_mode, is_rr_running
 from cogs.coord_finder import CoordinateFinder
 from cogs.target_window_manager import TargetWindowManager
 from cogs.mode_manager import ModeManager
@@ -671,15 +672,13 @@ class ClientControlGUI:
 
     def check_automation_status(self):
         """Periodically check if automation is still running"""
-        # Import here to avoid circular imports
-        from cogs.mode_rr import _rr_running
-        
         mode = self.mode_var.get()
-        
+
         if mode == "Realm Raid":
-            if _rr_running and self.automation_running:
+            rr_active = is_rr_running()
+            if rr_active and self.automation_running:
                 self.update_status("Running: Realm Raid", 'green')
-            elif self.automation_running and not _rr_running:
+            elif self.automation_running and not rr_active:
                 # Automation stopped (likely due to error or completion)
                 self.automation_running = False
                 self.sleep_manager.allow_sleep()
@@ -833,14 +832,15 @@ class ClientControlGUI:
             
             if success:
                 self.log_action(message, 'success')
-                self.resize_windows_after_width_change()
-                self.set_size_btn['state'] = 'disabled'
-                self.mode_combo['state'] = 'readonly'  # Enable mode dropdown when Set Size becomes inactive
-                self.start_btn['state'] = 'normal'
-                self.resize_btn['state'] = 'normal'
+                def _on_width_done(resize_success):
+                    self.set_size_btn['state'] = 'disabled'
+                    self.mode_combo['state'] = 'readonly'
+                    self.start_btn['state'] = 'normal'
+                    self.resize_btn['state'] = 'normal'
+                self.resize_windows_after_width_change(on_complete=_on_width_done)
             else:
                 self.log_action(message, 'error')
-                
+
         except ValueError:
             self.log_action("Please enter a valid number for width", 'error')
         except Exception as e:
@@ -849,46 +849,65 @@ class ClientControlGUI:
     def reset_window_width(self):
         """Reset window width and resize windows"""
         success, message, default_width = self.window_settings_manager.reset_window_width()
-        
+
         if success:
             self.width_var.set(str(default_width))
             self.log_action(message, 'success')
-            self.resize_windows_after_width_change()
-            self.set_size_btn['state'] = 'disabled'
-            self.mode_combo['state'] = 'readonly'  # Enable mode dropdown when Set Size becomes inactive
-            self.start_btn['state'] = 'normal'
-            self.resize_btn['state'] = 'normal'
+            def _on_reset_done(resize_success):
+                self.set_size_btn['state'] = 'disabled'
+                self.mode_combo['state'] = 'readonly'
+                self.start_btn['state'] = 'normal'
+                self.resize_btn['state'] = 'normal'
+            self.resize_windows_after_width_change(on_complete=_on_reset_done)
         else:
             self.log_action(message, 'error')
 
-    def resize_windows(self, action_label="Resizing client windows", update_buttons=True):
-        """Unified method to resize all windows"""
-        try:
-            success = resize_all_clients(
-                self.log_action, 
-                config_path=self.CONFIG_PATH,  # ✅ Pass the config path!
-                action_label=action_label
-            )
-            
-            if success:
-                self.log_action("Window resize completed successfully", 'success')
-                
-                if update_buttons:
-                    self.start_btn['state'] = 'normal'
+    def resize_windows(self, action_label="Resizing client windows", update_buttons=True, on_complete=None):
+        """Unified method to resize all windows.
+        Runs in a background thread to keep the GUI responsive."""
+        # Disable resize controls immediately to prevent double-clicks
+        self.resize_btn['state'] = 'disabled'
+        self.set_size_btn['state'] = 'disabled'
+
+        def _run():
+            try:
+                success = resize_all_clients(
+                    self.log_action,
+                    config_path=self.CONFIG_PATH,
+                    action_label=action_label
+                )
+            except Exception as e:
+                self.log_action(f"Error during resize operation: {e}", 'error')
+                import traceback
+                traceback.print_exc()
+                success = False
+
+            def _done():
+                if success:
+                    self.log_action("Window resize completed successfully", 'success')
+                    if update_buttons:
+                        self.start_btn['state'] = 'normal'
+                        self.resize_btn['state'] = 'normal'
+                        if "Setting window size" in action_label:
+                            self.set_size_btn['state'] = 'disabled'
+                            self.mode_combo['state'] = 'readonly'
+                        else:
+                            self.set_size_btn['state'] = 'normal'
+                    else:
+                        # Auto-resize: just restore the resize controls
+                        self.resize_btn['state'] = 'normal'
+                        self.set_size_btn['state'] = 'normal'
+                else:
+                    self.log_action("Window resize failed", 'error')
                     self.resize_btn['state'] = 'normal'
-                    if "Setting window size" in action_label:
-                        self.set_size_btn['state'] = 'disabled'
-                        self.mode_combo['state'] = 'readonly'
-            else:
-                self.log_action("Window resize failed", 'error')
-            
-            return success
-            
-        except Exception as e:
-            self.log_action(f"Error during resize operation: {e}", 'error')
-            import traceback
-            traceback.print_exc()
-            return False
+                    self.set_size_btn['state'] = 'normal'
+
+                if on_complete:
+                    on_complete(success)
+
+            self.root.after(0, _done)
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def resize_clients(self):
         """Manual resize clients"""
@@ -898,25 +917,33 @@ class ClientControlGUI:
     def set_size(self):
         """Initial window size setup"""
         self.log_action("Set Size button clicked", 'control')
-        success = self.resize_windows(action_label="Setting window size for all clients", update_buttons=True)
-    
-        if success:
-            self.log_action("Set Size completed - Start button enabled", 'success')
-        else:
-            self.log_action("Set Size failed - please check logs", 'error')
 
-    def resize_windows_after_width_change(self):
+        def _on_done(success):
+            if success:
+                self.log_action("Set Size completed - Start button enabled", 'success')
+            else:
+                self.log_action("Set Size failed - please check logs", 'error')
+
+        self.resize_windows(action_label="Setting window size for all clients", update_buttons=True, on_complete=_on_done)
+
+    def resize_windows_after_width_change(self, on_complete=None):
         """Resize after width change"""
-        self.resize_windows(action_label="Auto-resizing windows to new width", update_buttons=False)
+        self.resize_windows(action_label="Auto-resizing windows to new width", update_buttons=False, on_complete=on_complete)
+
+    MAX_LOG_LINES = 500
 
     def log_action(self, message, tag='system'):
-        """Thread-safe logging"""
+        """Thread-safe logging with auto-trim to keep the log widget fast."""
         def _log():
             self.log_text.config(state='normal')
             self.log_text.insert('end', f"[{tag.upper()}] {message}\n", tag)
+            # Trim oldest lines when the buffer exceeds the limit
+            line_count = int(self.log_text.index('end-1c').split('.')[0])
+            if line_count > self.MAX_LOG_LINES:
+                self.log_text.delete('1.0', f'{line_count - self.MAX_LOG_LINES}.0')
             self.log_text.see('end')
             self.log_text.config(state='disabled')
-        
+
         # Schedule on main thread if called from another thread
         self.root.after(0, _log)
 

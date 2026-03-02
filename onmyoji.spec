@@ -25,6 +25,10 @@ a = Analysis(
         'cogs.window_fetcher',
         'cogs.window_manager',
         'cogs.window_settings_manager',
+        'cogs.sleep_manager',
+        'ttkbootstrap',
+        'ttkbootstrap.themes'
+
     ],
     hookspath=[],
     hooksconfig={},
@@ -48,7 +52,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,  # Set to True for debugging if needed
+    console=False, 
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

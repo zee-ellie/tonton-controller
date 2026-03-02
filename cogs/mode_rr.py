@@ -16,6 +16,7 @@ from ctypes import windll
 _rr_running = False
 _rr_thread = None
 _rr_automation_instance = None
+_rr_stop_event = threading.Event()
 
 # Windows API setup
 user32 = ctypes.windll.user32
@@ -260,21 +261,15 @@ class RealmRaidAutomation:
             return False, 0.0
     
     def interruptible_sleep(self, seconds):
-        """Sleep that can be interrupted by stop signal"""
-        global _rr_running
-        
-        end_time = time.time() + seconds
-        check_count = 0
-        while time.time() < end_time:
-            check_count += 1
-            if check_count % 10 == 0:
-                print(f"[SLEEP] Sleeping... {int(end_time - time.time())}s remaining")
-            
-            if not self.running or not _rr_running:
-                print(f"[STOP] Stop detected in sleep!")
-                return False
-            
-            time.sleep(0.1)
+        """Sleep that can be interrupted by stop signal.
+        Uses threading.Event.wait() so Stop takes effect immediately."""
+        # wait() returns True if the event was set (stop requested),
+        # False if the timeout elapsed normally.
+        if _rr_stop_event.wait(seconds):
+            print(f"[STOP] Stop detected in sleep!")
+            return False
+        if not self.running:
+            return False
         return True
     
     def load_config(self):
@@ -1031,9 +1026,14 @@ class RealmRaidAutomation:
         
         return False
     
+def is_rr_running():
+    """Return whether Realm Raid automation is currently active."""
+    return _rr_running
+
+
 def run_rr_mode(log_func, config_path, coords_path, target_hwnd, ref_path):
     """Start Realm Raid mode with the specified target window
-    
+
     Args:
         log_func: Logging function
         config_path: Path to config.ini
@@ -1041,11 +1041,12 @@ def run_rr_mode(log_func, config_path, coords_path, target_hwnd, ref_path):
         target_hwnd: The HWND of the window to automate (integer)
     """
     global _rr_running, _rr_thread, _rr_automation_instance
-    
+
     if _rr_running:
         log_func("Realm Raid already running", 'error')
         return
-    
+
+    _rr_stop_event.clear()
     _rr_running = True
     _rr_automation_instance = RealmRaidAutomation(
         log_func, 
@@ -1069,10 +1070,11 @@ def run_rr_mode(log_func, config_path, coords_path, target_hwnd, ref_path):
 def stop_rr_mode():
     """Stop Realm Raid mode"""
     global _rr_running, _rr_automation_instance
-    
+
     if _rr_running and _rr_automation_instance:
         _rr_automation_instance.running = False
         _rr_running = False
+        _rr_stop_event.set()  # Wake any interruptible_sleep immediately
         return True
-    
+
     return False
