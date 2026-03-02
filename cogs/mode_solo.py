@@ -1,12 +1,14 @@
 import time
 import threading
 import configparser
+import ctypes
+from ctypes import wintypes
 import win32api
 import win32con
 import pygetwindow as gw
 from datetime import datetime
 
-stop_flag = False
+_stop_event = threading.Event()
 
 def parse_coord(coord_str):
     """Parse coordinate string like '370, 150' to tuple"""
@@ -20,17 +22,16 @@ def click_in_window(hwnd, rel_x, rel_y):
     win32api.PostMessage(hwnd, win32con.WM_LBUTTONUP, None, lParam)
 
 def solo_click_loop(log_action, config_path, coords_path):
-    global stop_flag
-    stop_flag = False
+    _stop_event.clear()
 
     # Load coordinates from coords.ini
     coords = configparser.ConfigParser()
     coords.read(coords_path, encoding='utf-8')
-    
+
     # Parse click_solo coordinate (new format: "x, y")
     click_solo_str = coords.get("SOLO", "click_solo", fallback="1040, 575")
     base_x, base_y = parse_coord(click_solo_str)
-    
+
     # Get interval
     interval = coords.getfloat("SOLO", "interval", fallback=1.5)
 
@@ -44,8 +45,8 @@ def solo_click_loop(log_action, config_path, coords_path):
         return
 
     # Load reference resolution
-    reference_width = cfg.getint("REFERENCE", "width", fallback=1152)
-    reference_height = cfg.getint("REFERENCE", "height", fallback=679)
+    reference_width = cfg.getint("REFERENCE", "width", fallback=1136)
+    reference_height = cfg.getint("REFERENCE", "height", fallback=640)
 
     start_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_action(f"SOLO mode thread started at {start_time}", "system")
@@ -59,8 +60,15 @@ def solo_click_loop(log_action, config_path, coords_path):
 
         win = windows[0]
         hwnd = win._hWnd
-        actual_width = win.width
-        actual_height = win.height
+
+        # Use GetClientRect so the scale ratio matches the CLIENT-relative
+        # coordinate space used by WM_LBUTTONDOWN and coords.ini.
+        # pygetwindow .width/.height returns WINDOW size (includes borders/title bar),
+        # which inflates the scale factor and shifts all clicks down-right.
+        _client_rect = wintypes.RECT()
+        ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(_client_rect))
+        actual_width  = _client_rect.right  - _client_rect.left
+        actual_height = _client_rect.bottom - _client_rect.top
 
         # Calculate scaling factors
         scale_x = actual_width / reference_width
@@ -77,7 +85,7 @@ def solo_click_loop(log_action, config_path, coords_path):
         return
 
     # Main click loop
-    while not stop_flag:
+    while not _stop_event.is_set():
         windows = gw.getWindowsWithTitle(instance_name)
         for win in windows:
             try:
@@ -85,7 +93,8 @@ def solo_click_loop(log_action, config_path, coords_path):
                 click_in_window(hwnd, rel_x, rel_y)
             except Exception as e:
                 log_action(f"Error clicking window: {e}", "error")
-        time.sleep(interval)
+        # Use event wait so Stop is responsive during the interval sleep
+        _stop_event.wait(interval)
 
     stop_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     log_action(f"SOLO mode stopped at {stop_time}", "system")
@@ -95,6 +104,5 @@ def run_solo_mode(log_action, config_path, coords_path):
     thread.start()
 
 def stop_solo_mode():
-    global stop_flag
-    stop_flag = True
+    _stop_event.set()
     return True
