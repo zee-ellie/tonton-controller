@@ -777,6 +777,15 @@ class RealmRaidAutomation:
     def run(self):
         """Main automation loop"""
         self.running = True
+        # Use DPI-unaware context so all Win32 calls (GetClientRect, SetWindowPos,
+        # PrintWindow, WM_LBUTTONDOWN) operate in the game's 96-DPI virtual space.
+        # This keeps resize, capture, and click coordinates accurate on any monitor DPI.
+        try:
+            # Pass as c_void_p so ctypes sends a 64-bit HANDLE, not a truncated 32-bit int.
+            # DPI_AWARENESS_CONTEXT_UNAWARE = (HANDLE)-1 = 0xFFFFFFFFFFFFFFFF on 64-bit Windows.
+            ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-1))
+        except Exception:
+            pass
         
         print("\n" + "="*60)
         print("[START] Realm Raid Automation Starting")

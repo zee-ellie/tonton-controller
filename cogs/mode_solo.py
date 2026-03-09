@@ -23,6 +23,14 @@ def click_in_window(hwnd, rel_x, rel_y):
 
 def solo_click_loop(log_action, config_path, coords_path):
     _stop_event.clear()
+    # Use DPI-unaware context so GetClientRect and WM_LBUTTONDOWN coordinates are always
+    # in the game's 96-DPI virtual space, consistent on any monitor DPI or screen resolution.
+    try:
+        # Pass as c_void_p so ctypes sends a 64-bit HANDLE, not a truncated 32-bit int.
+        # DPI_AWARENESS_CONTEXT_UNAWARE = (HANDLE)-1 = 0xFFFFFFFFFFFFFFFF on 64-bit Windows.
+        ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-1))
+    except Exception:
+        pass
 
     # Load coordinates from coords.ini
     coords = configparser.ConfigParser()
