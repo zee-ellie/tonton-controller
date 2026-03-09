@@ -20,16 +20,24 @@ def make_dpi_aware():
     """Make the application DPI-aware on Windows"""
     if sys.platform == 'win32':
         try:
-            # Try to set DPI awareness (Windows 8.1+)
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)  # PROCESS_SYSTEM_DPI_AWARE
-            print("✓ DPI awareness enabled (SetProcessDpiAwareness)")
+            # PER_MONITOR_V2: Win10 1703+ — app handles DPI changes per monitor,
+            # no bitmap-scaling when window moves between monitors.
+            ctypes.windll.user32.SetProcessDpiAwarenessContext(-4)
+            print("✓ DPI awareness: Per-Monitor V2")
         except Exception:
             try:
-                # Fallback for Windows Vista/7/8
-                ctypes.windll.user32.SetProcessDPIAware()
-                print("✓ DPI awareness enabled (SetProcessDPIAware)")
-            except Exception as e:
-                print(f"⚠️  Could not enable DPI awareness: {e}")
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR, Win8.1+
+                print("✓ DPI awareness: Per-Monitor")
+            except Exception:
+                try:
+                    ctypes.windll.shcore.SetProcessDpiAwareness(1)  # SYSTEM, Win8.1+
+                    print("✓ DPI awareness: System")
+                except Exception:
+                    try:
+                        ctypes.windll.user32.SetProcessDPIAware()
+                        print("✓ DPI awareness: Legacy")
+                    except Exception as e:
+                        print(f"⚠️  Could not enable DPI awareness: {e}")
 
 class ClientControlGUI:
     def __init__(self, root, config_path, coords_path):
@@ -48,9 +56,6 @@ class ClientControlGUI:
         except:
             pass        
         
-        self.dpi_scale = self.get_dpi_scale()
-        print(f"📊 DPI Scaling: {self.dpi_scale * 100:.0f}%")
-
         self.style = Style(theme='cyborg')
 
         # Initialize WindowFetcher first
@@ -75,21 +80,29 @@ class ClientControlGUI:
             
         self.setup_gui()
 
-    def get_dpi_scale(self):
-        """Get the current DPI scaling factor"""
+    def _position_on_game_monitor(self):
+        """Move root window to the top-left of whichever monitor the first Onmyoji
+        client is on. Called before root.update() so the window is not yet visible."""
         try:
-            import ctypes
-            # Get DPI for the main screen
-            hdc = ctypes.windll.user32.GetDC(0)
-            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
-            ctypes.windll.user32.ReleaseDC(0, hdc)
-            
-            # Standard DPI is 96, so scaling factor is dpi/96
-            scale = dpi / 96.0
-            return scale
-        except Exception as e:
-            print(f"⚠️  Error getting DPI scale: {e}")
-            return 1.0  # Default to 100% scaling
+            windows = self.window_fetcher.get_all_windows_sorted()
+            if not windows:
+                return
+            game_hwnd = windows[0]._hWnd
+            monitor = ctypes.windll.user32.MonitorFromWindow(game_hwnd, 2)  # DEFAULTTONEAREST
+
+            class _RECT(ctypes.Structure):
+                _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                             ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+            class _MONITORINFO(ctypes.Structure):
+                _fields_ = [("cbSize", ctypes.c_uint32), ("rcMonitor", _RECT),
+                             ("rcWork", _RECT), ("dwFlags", ctypes.c_uint32)]
+
+            mi = _MONITORINFO()
+            mi.cbSize = ctypes.sizeof(_MONITORINFO)
+            ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(mi))
+            self.root.geometry(f"+{mi.rcMonitor.left}+{mi.rcMonitor.top}")
+        except Exception:
+            pass  # Non-fatal: window stays wherever the OS placed it
 
     def validate_initial_setup(self):
         """Validate that required windows exist - with proper UTF-8 handling"""
@@ -169,14 +182,10 @@ class ClientControlGUI:
     def setup_gui(self):
         self.root.title("吨吨鼠Controls")
         
-        # Scale window size based on DPI
-        base_width = 300
-        base_height = 400
-        scaled_width = int(base_width * self.dpi_scale)
-        scaled_height = int(base_height * self.dpi_scale)
-        
-        self.root.geometry(f"{scaled_width}x{scaled_height}")
+        self.root.geometry("300x400")
         self.root.resizable(False, False)
+        self._position_on_game_monitor()  # snap to Onmyoji's monitor before first draw
+        self.root.update()
 
         try:
             self.root.iconbitmap('icon.ico')
@@ -910,24 +919,24 @@ class ClientControlGUI:
                 success = False
 
             def _done():
+                is_set_size = "Setting window size" in action_label
                 if success:
                     self.log_action("Window resize completed successfully", 'success')
                     if update_buttons:
                         self.start_btn['state'] = 'normal'
                         self.resize_btn['state'] = 'normal'
-                        if "Setting window size" in action_label:
+                        if is_set_size:
                             self.set_size_btn['state'] = 'disabled'
                             self.mode_combo['state'] = 'readonly'
-                        else:
-                            self.set_size_btn['state'] = 'normal'
+                        # else: leave set_size_btn unchanged — stays disabled after Set Size
                     else:
-                        # Auto-resize: just restore the resize controls
                         self.resize_btn['state'] = 'normal'
-                        self.set_size_btn['state'] = 'normal'
+                        # leave set_size_btn unchanged
                 else:
                     self.log_action("Window resize failed", 'error')
                     self.resize_btn['state'] = 'normal'
-                    self.set_size_btn['state'] = 'normal'
+                    if is_set_size:
+                        self.set_size_btn['state'] = 'normal'  # allow retry only if Set Size itself failed
 
                 if on_complete:
                     on_complete(success)
@@ -962,6 +971,8 @@ class ClientControlGUI:
     def log_action(self, message, tag='system'):
         """Thread-safe logging with auto-trim to keep the log widget fast."""
         def _log():
+            if not hasattr(self, 'log_text'):
+                return
             self.log_text.config(state='normal')
             self.log_text.insert('end', f"[{tag.upper()}] {message}\n", tag)
             # Trim oldest lines when the buffer exceeds the limit

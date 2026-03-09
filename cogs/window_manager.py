@@ -6,12 +6,21 @@ from ctypes import wintypes
 
 def resize_all_clients(log_action, config_path=None, *, action_label="Resizing client windows"):
     """Resize windows to target CLIENT width (not window width)
-    
+
     Args:
         log_action: Logging callback function
         config_path: Path to config.ini (optional, defaults to 'config.ini')
         action_label: Label for the action in logs
     """
+    # DPI_AWARENESS_CONTEXT_UNAWARE: all Win32 calls (GetClientRect, GetWindowRect,
+    # SetWindowPos via pygetwindow.resizeTo) operate in virtual 96-DPI space so that
+    # target_client_width from config.ini (a virtual pixel value) compares and is applied
+    # correctly on any monitor DPI or screen scaling factor.
+    try:
+        ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-1))
+    except Exception:
+        pass
+
     log_action(action_label, 'control')
 
     try:

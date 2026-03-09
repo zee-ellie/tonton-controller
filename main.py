@@ -1,6 +1,7 @@
 # main.py
 import os
 import sys
+import ctypes
 import tkinter as tk
 from pathlib import Path
 
@@ -113,7 +114,15 @@ def main():
         # Verify templates exist
         verify_templates()
         
-        # Initialize GUI (DPI awareness already enabled)
+        # Make the GUI main thread DPI-unaware so Tkinter never receives
+        # WM_DPICHANGED. The window will be bitmap-scaled by Windows on
+        # high-DPI monitors — fixed size, no resize loop, no drag freeze.
+        # Click threads set their own DPI_UNAWARE context separately.
+        try:
+            ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-1))
+        except Exception:
+            pass
+
         root = tk.Tk()
         app = ClientControlGUI(root, str(config_path), str(coords_path))
         root.mainloop()

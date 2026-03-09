@@ -13,6 +13,8 @@ class CoordinateFinder:
         self.window_fetcher = window_fetcher or WindowFetcher(config_path)
         self.hotkey_listening = False
         self.user32 = ctypes.windll.user32
+        self.user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        self.user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
         
     def get_screen_position(self):
         """Get current mouse position in screen coordinates"""
@@ -163,36 +165,43 @@ class CoordinateFinder:
             'color_method': 'none'
         }
         
-        if hwnd is not None:
-            print(f"[CAPTURE] Window selected (HWND: {hwnd})")
-            
-            # Get client-relative coordinates (excludes borders/title bar)
-            client_x, client_y = self.get_client_coordinates(hwnd)
-            result['client_x'] = client_x
-            result['client_y'] = client_y
-            
-            print(f"[CAPTURE] Converted to client coords: ({client_x}, {client_y})")
-            
-            # Get color using window DC method (works behind other windows)
-            if client_x is not None and client_y is not None:
-                hex_color, rgb_color = self.get_pixel_color(client_x, client_y, hwnd)
+        # Switch to DPI-unaware context so GetCursorPos, ScreenToClient, and GetClientRect
+        # all return virtual 96-DPI coordinates — the same space automation uses for clicks.
+        prev_ctx = self.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-1))
+        try:
+            if hwnd is not None:
+                print(f"[CAPTURE] Window selected (HWND: {hwnd})")
+
+                # Get client-relative coordinates (excludes borders/title bar)
+                client_x, client_y = self.get_client_coordinates(hwnd)
+                result['client_x'] = client_x
+                result['client_y'] = client_y
+
+                print(f"[CAPTURE] Converted to client coords: ({client_x}, {client_y})")
+
+                # Get color using window DC method (works behind other windows)
+                if client_x is not None and client_y is not None:
+                    hex_color, rgb_color = self.get_pixel_color(client_x, client_y, hwnd)
+                    result['hex_color'] = hex_color
+                    result['rgb_color'] = rgb_color
+                    result['color_method'] = 'window_dc'
+                    print(f"[CAPTURE] Color method: Window DC (non-intrusive)")
+                else:
+                    print(f"[CAPTURE] ✗ Failed to get client coordinates")
+
+                # Get window information for debugging
+                result['window_info'] = self.get_window_info(hwnd)
+            else:
+                print(f"[CAPTURE] No window selected - using screen capture method")
+                # No window selected - use screen method
+                hex_color, rgb_color = self.get_pixel_color(screen_x, screen_y)
                 result['hex_color'] = hex_color
                 result['rgb_color'] = rgb_color
-                result['color_method'] = 'window_dc'
-                print(f"[CAPTURE] Color method: Window DC (non-intrusive)")
-            else:
-                print(f"[CAPTURE] ✗ Failed to get client coordinates")
-            
-            # Get window information for debugging
-            result['window_info'] = self.get_window_info(hwnd)
-        else:
-            print(f"[CAPTURE] No window selected - using screen capture method")
-            # No window selected - use screen method
-            hex_color, rgb_color = self.get_pixel_color(screen_x, screen_y)
-            result['hex_color'] = hex_color
-            result['rgb_color'] = rgb_color
-            result['color_method'] = 'screen'
-        
+                result['color_method'] = 'screen'
+        finally:
+            if prev_ctx:
+                self.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(prev_ctx))
+
         print("="*60 + "\n")
         return result
     
